@@ -6,7 +6,7 @@
 FROM eclipse-temurin:17-jdk AS backend-build
 WORKDIR /app
 
-
+COPY .mvn .mvn
 # Copy Maven wrapper & POM first for dependency caching
 COPY mvnw mvnw.cmd pom.xml ./
 
