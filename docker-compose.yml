@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  # ── Base de données PostgreSQL ────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: lorcalex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lorcalex
+      POSTGRES_USER: lorcalex
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-lorcalex}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lorcalex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Application Spring Boot (frontend intégré) ────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lorcalex-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8181}:8181"
+    environment:
+      # Profil Spring (docker = PostgreSQL)
+      SPRING_PROFILES_ACTIVE: docker
+      # Base de données
+      DB_URL: jdbc:postgresql://postgres:5432/lorcalex
+      DB_USERNAME: lorcalex
+      DB_PASSWORD: ${DB_PASSWORD:-lorcalex}
+      # JWT – À CHANGER en production !
+      JWT_SECRET: ${JWT_SECRET:-lorcalex-super-secret-key-change-in-production-!}
+      # Identifiants administrateur
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-admin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8181/api/auth/me || true"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
