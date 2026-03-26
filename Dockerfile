@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Copy Maven wrapper & POM first for dependency caching
 COPY mvnw mvnw.cmd pom.xml ./
-COPY .mvn .mvn
+
 
 # Make mvnw executable
 RUN chmod +x mvnw
