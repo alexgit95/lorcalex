@@ -27,9 +27,7 @@ RUN ./mvnw package -DskipTests -B
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 
-# Non-root user for security
-RUN addgroup -S lorcalex && adduser -S lorcalex -G lorcalex
-USER lorcalex
+
 
 COPY --from=backend-build /app/target/lorcalex-*.jar app.jar
 
