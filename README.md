@@ -13,7 +13,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 | **Visualisation carte** | Clic sur une carte → grande image plein-écran, compteur de possession, modification de la quantité directement. |
 | **Statistiques** | Graphiques (donut, barres empilées) : progression globale, par set, par rareté |
 | **Scanner** | Scanner **OCR caméra en continu** : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, ajout d'exemplaire, reprise rapide du scan. |
-| **Administration** | Import du catalogue LorcaJson (par URL ou fichier), import/export JSON de la collection |
+| **Administration** | Import du catalogue LorcaJson (URL/fichier), import/export JSON de la collection, import **Lorcana Companion** (mode fusion/remplacement) avec barre de progression |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion |
 
 ---
@@ -200,11 +200,13 @@ Toutes les routes nécessitent un Bearer JWT (sauf `/api/auth/login`).
 | `DELETE` | `/api/collection/{cardId}` | Supprimer de la collection |
 | `GET` | `/api/statistics` | Statistiques complètes |
 | `GET/PUT` | `/api/admin/settings/{key}` | Paramètres admin |
+| `GET` | `/api/admin/progress` | État de progression des opérations asynchrones (sync/import/hash) |
 | `POST` | `/api/admin/sync/url` | Import LorcaJson depuis URL |
 | `POST` | `/api/admin/sync/file` | Import LorcaJson depuis fichier multipart |
 | `GET` | `/api/admin/lorcajson-url` | URL LorcaJson configurée |
 | `GET` | `/api/admin/export` | Export JSON de la collection |
 | `POST` | `/api/admin/import` | Import JSON de la collection |
+| `POST` | `/api/admin/import/companion?merge=true|false` | Import Companion (asynchrone) avec mode fusion/remplacement |
 
 ---
 
@@ -231,6 +233,35 @@ Importe un fichier précédemment exporté.
 - Si la carte est déjà dans la collection → quantité **mise à jour**.  
 - Si la carte est inconnue → entrée **ignorée**.  
 - Les cartes absentes du fichier **ne sont pas supprimées**.
+
+---
+
+## Import depuis Lorcana Companion
+
+Accessible depuis **Administration → Import depuis Lorcana Companion**.
+
+### Format supporté
+
+- Export JSON de l'application Companion contenant la clé `OwnedCardQuantitiesV2`.
+- Les entrées dupliquées d'une même carte (ex: `Regular` + `Foiled`) sont additionnées.
+
+### Modes d'import
+
+- **Fusion** (par défaut) : ajoute les quantités importées aux quantités déjà présentes.
+- **Remplacement** : remplace les quantités existantes par celles du fichier importé.
+
+### Progression
+
+- L'import Companion est asynchrone.
+- Une barre de progression est affichée dans l'Administration, avec les phases:
+  - `📄 Analyse Companion`
+  - `📥 Import Companion`
+  - puis `✅ Terminé` / `❌ Erreur`
+
+### Pré-requis important
+
+- Le mapping Companion repose sur l'`externalId` des cartes.
+- Si beaucoup de cartes sont indiquées comme non trouvées, relancez d'abord une synchronisation du catalogue LorcaJson en Administration.
 
 ---
 

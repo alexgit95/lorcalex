@@ -96,6 +96,20 @@ const api = {
 
   exportCollection: () => apiFetch('/admin/export'),
   importCollection: (data) => apiFetch('/admin/import', { method: 'POST', body: JSON.stringify(data) }),
+  importCompanionCollection: (file, merge = true) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getToken();
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const params = new URLSearchParams({ merge: String(!!merge) });
+    return fetch('/api/admin/import/companion?' + params.toString(), { method: 'POST', headers, body: formData })
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+        return json;
+      });
+  },
 };
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -1363,6 +1377,8 @@ function updateAdminProgress(p) {
     parsing:     '📄 Analyse JSON',
     sync:        '🔄 Synchronisation',
     hashing:     '🔍 Calcul empreintes',
+    companion_parsing: '📄 Analyse Companion',
+    companion_import:  '📥 Import Companion',
     done:        '✅ Terminé',
     error:       '❌ Erreur',
   };
@@ -1390,8 +1406,10 @@ function setSyncBusy(busy) {
     const el = document.getElementById(id);
     if (el) el.disabled = busy;
   });
-  const fi = document.getElementById('lorcajsonFile');
-  if (fi) fi.disabled = busy;
+  ['lorcajsonFile', 'companionImportFile', 'companionMergeMode'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
 }
 
 function renderAdmin() {
@@ -1416,10 +1434,16 @@ function renderAdmin() {
     navigate('login');
   });
 
-  Promise.all([api.getSettings(), api.getLorcaJsonUrl(), api.getProgress()]).then(([settings, urlData, progressData]) => {
+  Promise.all([api.getSettings(), api.getLorcaJsonUrl(), api.getProgress(), api.getEditions()]).then(([settings, urlData, progressData, editions]) => {
     const content = document.getElementById('adminContent');
     if (!content) return;
     const currentUrl = urlData.url || 'https://lorcanajson.org/files/current/fr/allCards.json';
+
+    const statsSetsSetting = settings.find(s => s.settingKey === 'stats_enabled_sets');
+    const savedStatsSetIds = statsSetsSetting
+      ? (statsSetsSetting.settingValue || '').split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v))
+      : editions.map(e => e.id);
+    const selectedSetIds = new Set(savedStatsSetIds);
 
     content.innerHTML = `
       <!-- Étape 1 : Synchronisation -->
@@ -1467,6 +1491,38 @@ function renderAdmin() {
         <div id="importExportResult" style="margin-top:8px"></div>
       </div>
 
+      <!-- Companion Import -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">Import depuis Lorcana Companion</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Importez un export Companion (clé <strong>OwnedCardQuantitiesV2</strong>). Les quantités Regular et Foiled sont additionnées.
+        </p>
+        <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--text-muted);margin:0 0 10px;cursor:pointer">
+          <input type="checkbox" id="companionMergeMode" checked style="accent-color:var(--accent)" />
+          Mode fusion : ajouter aux quantités existantes (sinon remplacement)
+        </label>
+        <label class="btn btn-ghost btn-full" style="cursor:pointer;margin-bottom:0">
+          📥 Importer un export Companion (.json)
+          <input type="file" id="companionImportFile" accept=".json,application/json" style="display:none" />
+        </label>
+        <div id="companionImportResult" style="margin-top:8px"></div>
+      </div>
+
+      <!-- Stats set filter -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">Sets suivis dans Statistiques</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Cochez les sets à inclure dans les calculs de l'onglet Stats. Ce réglage n'affecte pas la collection.
+        </p>
+        <div id="statsSetChecklist" style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow:auto;padding:2px 0 8px"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" id="statsSetsAllBtn" style="flex:1">Tout cocher</button>
+          <button class="btn btn-ghost" id="statsSetsNoneBtn" style="flex:1">Tout décocher</button>
+        </div>
+        <button class="btn btn-accent btn-full" id="saveStatsSetsBtn" style="margin-top:8px">Enregistrer les sets suivis</button>
+        <div id="statsSetsResult" style="margin-top:8px"></div>
+      </div>
+
       <!-- Paramètres -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Paramètres</h3>
@@ -1493,6 +1549,47 @@ function renderAdmin() {
       setSyncBusy(true);
       startSyncPoll();
     }
+
+    // ── Stats sets filter ─────────────────────────────────────────────────
+    const checklist = document.getElementById('statsSetChecklist');
+    if (checklist) {
+      checklist.innerHTML = editions.map(e => {
+        const checked = selectedSetIds.has(e.id) ? 'checked' : '';
+        const label = e.setNumber ? `Set ${e.setNumber} — ${esc(e.name)}` : esc(e.code || e.name);
+        return `<label style="display:flex;align-items:center;gap:8px;font-size:.86rem;color:var(--text-muted);cursor:pointer">
+          <input type="checkbox" class="stats-set-checkbox" value="${e.id}" ${checked} style="accent-color:var(--accent)" />
+          <span>${label}</span>
+        </label>`;
+      }).join('');
+    }
+
+    document.getElementById('statsSetsAllBtn').addEventListener('click', () => {
+      document.querySelectorAll('.stats-set-checkbox').forEach(cb => { cb.checked = true; });
+    });
+
+    document.getElementById('statsSetsNoneBtn').addEventListener('click', () => {
+      document.querySelectorAll('.stats-set-checkbox').forEach(cb => { cb.checked = false; });
+    });
+
+    document.getElementById('saveStatsSetsBtn').addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('.stats-set-checkbox:checked'))
+        .map(cb => parseInt(cb.value, 10))
+        .filter(v => !isNaN(v));
+      const value = selected.join(',');
+
+      try {
+        await api.updateSetting('stats_enabled_sets', value);
+        showAdminResult('statsSetsResult', {
+          success: true,
+          message: `${selected.length} set(s) activé(s) pour l'onglet Stats.`
+        });
+      } catch (err) {
+        showAdminResult('statsSetsResult', {
+          success: false,
+          message: 'Erreur sauvegarde sets Stats : ' + err.message
+        });
+      }
+    });
 
     // ── Save URL ───────────────────────────────────────────────────────────
     document.getElementById('saveUrlBtn').addEventListener('click', async () => {
@@ -1582,6 +1679,35 @@ function renderAdmin() {
         collState.cards = [];
       } catch (err) {
         showAdminResult('importExportResult', { success: false, message: 'Erreur import : ' + err.message });
+      } finally {
+        e.target.value = '';
+      }
+    });
+
+    // ── Import Companion ───────────────────────────────────────────────────
+    document.getElementById('companionImportFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const mergeMode = document.getElementById('companionMergeMode')?.checked !== false;
+      setSyncBusy(true);
+      try {
+        const result = await api.importCompanionCollection(file, mergeMode);
+        if (result.started) {
+          collState.cards = [];
+          collState.editions = [];
+          showAdminResult('companionImportResult', {
+            success: true,
+            message: result.message || 'Import Companion démarré.'
+          });
+          startSyncPoll();
+        } else {
+          setSyncBusy(false);
+          updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+            message: result.message || 'Import Companion non démarré.', running: false, error: true });
+        }
+      } catch (err) {
+        setSyncBusy(false);
+        showAdminResult('companionImportResult', { success: false, message: 'Erreur import Companion : ' + err.message });
       } finally {
         e.target.value = '';
       }

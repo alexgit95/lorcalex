@@ -3,9 +3,11 @@ package com.alexgit95.service;
 import com.alexgit95.model.AppSettings;
 import com.alexgit95.model.Card;
 import com.alexgit95.model.Edition;
+import com.alexgit95.model.UserCollection;
 import com.alexgit95.repository.AppSettingsRepository;
 import com.alexgit95.repository.CardRepository;
 import com.alexgit95.repository.EditionRepository;
+import com.alexgit95.repository.UserCollectionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 @Service
 public class LorcaJsonService {
@@ -38,6 +41,7 @@ public class LorcaJsonService {
     private final AppSettingsRepository settingsRepository;
     private final CardRepository cardRepository;
     private final EditionRepository editionRepository;
+    private final UserCollectionRepository userCollectionRepository;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -54,11 +58,13 @@ public class LorcaJsonService {
     public LorcaJsonService(AppSettingsRepository settingsRepository,
                             CardRepository cardRepository,
                             EditionRepository editionRepository,
+                            UserCollectionRepository userCollectionRepository,
                             WebClient.Builder webClientBuilder,
                             ObjectMapper objectMapper) {
         this.settingsRepository = settingsRepository;
         this.cardRepository = cardRepository;
         this.editionRepository = editionRepository;
+        this.userCollectionRepository = userCollectionRepository;
         this.webClientBuilder = webClientBuilder;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
@@ -169,6 +175,22 @@ public class LorcaJsonService {
         });
     }
 
+    /** Asynchronously import collection from Lorcana Companion export file. */
+    public void startCompanionImportFromContent(String jsonContent, boolean mergeMode) {
+        if (isRunning()) return;
+        progress.set(new ProgressInfo("companion_parsing", 0, 0,
+                "Analyse de l'export Companion…", true, false));
+        executor.submit(() -> {
+            try {
+                doCompanionImport(jsonContent, mergeMode);
+            } catch (Exception e) {
+                log.error("Companion import failed: {}", e.getMessage());
+                progress.set(new ProgressInfo("error", 0, 0,
+                        "Erreur : " + e.getMessage(), false, true));
+            }
+        });
+    }
+
     // ─── Internal sync ────────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
@@ -268,6 +290,91 @@ public class LorcaJsonService {
         progress.set(new ProgressInfo("done", total, total, msg, false, false));
     }
 
+    @SuppressWarnings("unchecked")
+    private void doCompanionImport(String jsonContent, boolean mergeMode) throws Exception {
+        progress.set(new ProgressInfo("companion_parsing", 0, 0,
+                "Analyse de l'export Companion…", true, false));
+
+        Map<String, Object> payload;
+        try {
+            payload = objectMapper.readValue(jsonContent, objectMapper.getTypeFactory()
+                    .constructMapType(Map.class, String.class, Object.class));
+        } catch (Exception e) {
+            throw new RuntimeException("Format JSON invalide : " + e.getMessage());
+        }
+
+        Object rawEntries = payload.get("OwnedCardQuantitiesV2");
+        if (!(rawEntries instanceof List<?> entries)) {
+            throw new RuntimeException("Format Companion invalide : clé 'OwnedCardQuantitiesV2' absente.");
+        }
+
+        Map<String, Integer> quantitiesByExternalId = new LinkedHashMap<>();
+        int skippedInvalidRows = 0;
+        for (Object raw : entries) {
+            if (!(raw instanceof Map<?, ?> row)) {
+                skippedInvalidRows++;
+                continue;
+            }
+            Object idRaw = row.get("Id");
+            Object quantityRaw = row.get("Quantity");
+            if (!(idRaw instanceof Number) || !(quantityRaw instanceof Number)) {
+                skippedInvalidRows++;
+                continue;
+            }
+
+            int quantity = ((Number) quantityRaw).intValue();
+            if (quantity <= 0) continue;
+
+            String externalId = String.valueOf(((Number) idRaw).intValue());
+            quantitiesByExternalId.merge(externalId, quantity, Integer::sum);
+        }
+
+        if (quantitiesByExternalId.isEmpty()) {
+            throw new RuntimeException("Aucune carte exploitable trouvée dans 'OwnedCardQuantitiesV2'.");
+        }
+
+        List<Card> matchedCards = cardRepository.findByExternalIdIn(quantitiesByExternalId.keySet());
+        Map<String, Card> cardsByExternalId = matchedCards.stream()
+                .collect(Collectors.toMap(Card::getExternalId, c -> c, (a, b) -> a));
+
+        int total = quantitiesByExternalId.size();
+        int processed = 0;
+        int imported = 0;
+        int skippedUnknown = 0;
+        progress.set(new ProgressInfo("companion_import", 0, total,
+                "Import Companion (0/" + total + ")…", true, false));
+
+        for (Map.Entry<String, Integer> entry : quantitiesByExternalId.entrySet()) {
+            Card card = cardsByExternalId.get(entry.getKey());
+            if (card == null) {
+                skippedUnknown++;
+            } else {
+                UserCollection uc = userCollectionRepository.findByCardId(card.getId())
+                        .orElseGet(UserCollection::new);
+                uc.setCard(card);
+                int incomingQty = entry.getValue();
+                int newQty = mergeMode ? (uc.getId() == null ? incomingQty : uc.getQuantity() + incomingQty) : incomingQty;
+                uc.setQuantity(newQty);
+                userCollectionRepository.save(uc);
+                imported++;
+            }
+
+            processed++;
+            progress.set(new ProgressInfo("companion_import", processed, total,
+                    "Import Companion (" + processed + "/" + total + ")…", true, false));
+        }
+
+        String modeLabel = mergeMode ? "fusion" : "remplacement";
+        String message = imported + " carte(s) importée(s) depuis Companion en mode " + modeLabel
+                + ", " + skippedUnknown + " non trouvée(s)"
+                + (skippedInvalidRows > 0 ? ", " + skippedInvalidRows + " ligne(s) invalide(s)" : "") + ".";
+        if (imported == 0) {
+            message += " Vérifiez que le catalogue a été re-synchronisé avec la dernière version LorcaJson.";
+        }
+
+        progress.set(new ProgressInfo("done", total, total, message, false, false));
+    }
+
     // ─── Card entity processing ───────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
@@ -338,9 +445,25 @@ public class LorcaJsonService {
             card.setThumbnailUrl(thumbnailUrl);
         }
 
-        card.setExternalId(setCode + "/" + cardNumber);
+        card.setExternalId(resolveExternalId(c, setCode, cardNumber));
         // Hash is NOT computed here — use startComputeHashes() (Étape 2)
         cardRepository.save(card);
+    }
+
+    private String resolveExternalId(Map<String, Object> cardData, String setCode, int cardNumber) {
+        String[] candidateKeys = {
+                "culture_invariant_id",
+                "cultureInvariantId",
+                "cardTraderId",
+                "id"
+        };
+        for (String key : candidateKeys) {
+            Object raw = cardData.get(key);
+            if (raw == null) continue;
+            String value = String.valueOf(raw).trim();
+            if (!value.isEmpty()) return value;
+        }
+        return setCode + "/" + cardNumber;
     }
 
     // ─── Edition lookup ───────────────────────────────────────────────────────

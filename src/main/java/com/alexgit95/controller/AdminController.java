@@ -194,4 +194,38 @@ public class AdminController {
                 "message", imported + " carte(s) importée(s), " + skipped + " ignorée(s)."
         ));
     }
+
+    @PostMapping("/import/companion")
+    public ResponseEntity<Map<String, Object>> importCompanionCollection(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(name = "merge", defaultValue = "true") boolean mergeMode) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "Aucun fichier fourni."
+            ));
+        }
+
+        if (lorcaJsonService.isRunning()) {
+            return ResponseEntity.ok(Map.of(
+                    "started", false,
+                    "running", true,
+                    "message", "Une opération est déjà en cours."
+            ));
+        }
+
+        try {
+            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+            lorcaJsonService.startCompanionImportFromContent(content, mergeMode);
+            return ResponseEntity.ok(Map.of(
+                    "started", true,
+                    "message", "Import Companion démarré en mode " + (mergeMode ? "fusion" : "remplacement") + "."
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "started", false,
+                    "message", "Impossible de lire le fichier Companion : " + e.getMessage()
+            ));
+        }
+    }
 }

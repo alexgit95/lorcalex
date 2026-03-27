@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Lorcalex">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a237e"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="192" height="192" rx="36" fill="url(#g)"/>
+  <path d="M40 44h24v104H40zm32 0h24v104H72zm32 0h24v104h-24z" fill="#f8fafc" opacity="0.9"/>
+  <path d="M141 56l11 20h-22z" fill="#f59e0b"/>
+</svg>
