@@ -630,7 +630,7 @@ function renderStatistics() {
       .filter(e => e.byRarity?.length > 0)
       .map((e, i) => `
         <div class="chart-container">
-          <h3>Rareté — ${esc(e.editionCode)}</h3>
+          <h3>${esc(e.editionName || e.editionCode || `Set ${i + 1}`)}</h3>
           <div style="height:180px"><canvas id="rarityChart${i}"></canvas></div>
         </div>`).join('');
 
@@ -1238,16 +1238,23 @@ function renderCardConfirmation(card) {
   if (!area) return;
   setScanAlert('');
   setScanDebug([]);
+  const isNewCard = !card.owned;
   const imgHtml = card.imageUrl
     ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)" onerror="this.style.display='none'" />`
     : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem">🃏</div>`;
+  const newCardBanner = isNewCard
+    ? `<div style="background:#d32f2f;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:4px 8px;border-radius:6px;margin-bottom:6px;text-align:center">Nouvelle carte</div>`
+    : '';
   const ownedQty = card.owned ? card.quantity : 0;
   const ownedInfo = `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px">En collection : <strong style="color:var(--text)">×${ownedQty}</strong></div>`;
   area.innerHTML = `
     <div style="padding:12px">
       <h3 style="font-size:.85rem;color:var(--text-muted);text-align:center;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Carte identifiée — confirmer ?</h3>
       <div style="display:flex;gap:14px;align-items:flex-start">
-        ${imgHtml}
+        <div style="width:110px;flex-shrink:0">
+          ${newCardBanner}
+          ${imgHtml}
+        </div>
         <div style="flex:1">
           <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
           <div style="font-size:.78rem;color:var(--primary-light);font-weight:700;margin-top:4px">${esc(card.editionCode)}</div>
@@ -1379,7 +1386,7 @@ function updateAdminProgress(p) {
 }
 
 function setSyncBusy(busy) {
-  ['syncUrlBtn', 'computeHashesBtn'].forEach(id => {
+  ['syncUrlBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = busy;
   });
@@ -1443,21 +1450,8 @@ function renderAdmin() {
         </div>
       </div>
 
-      <!-- Progression (partagée étapes 1 & 2) -->
+      <!-- Progression -->
       <div id="adminProgressBox" class="edition-item" style="margin-bottom:12px;display:none"></div>
-
-      <!-- Étape 2 : Empreintes -->
-      <div class="edition-item" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-          <span style="background:var(--primary-light);color:#fff;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">2</span>
-          <h3 style="margin:0">Empreintes visuelles (scanner)</h3>
-        </div>
-        <p style="font-size:.83rem;color:var(--text-muted);margin-bottom:10px;line-height:1.5">
-          Après la synchronisation, calculez les empreintes visuelles des cartes pour la reconnaissance par scanner.
-          Cette opération télécharge chaque vignette — elle peut prendre plusieurs minutes.
-        </p>
-        <button class="btn btn-ghost btn-full" id="computeHashesBtn">🔍 Calculer les empreintes</button>
-      </div>
 
       <!-- Collection Import / Export -->
       <div class="edition-item" style="margin-bottom:12px">
@@ -1556,26 +1550,6 @@ function renderAdmin() {
         setSyncBusy(false);
         updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
           message: err.message, running: false, error: true });
-      }
-    });
-
-    // ── Compute hashes ─────────────────────────────────────────────────────
-    document.getElementById('computeHashesBtn').addEventListener('click', async () => {
-      setSyncBusy(true);
-      try {
-        const result = await api.computeHashes();
-        if (result.started) {
-          _fingerprintsCache = null;
-          startSyncPoll();
-        } else {
-          setSyncBusy(false);
-          updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
-            message: result.message, running: false, error: true });
-        }
-      } catch (e) {
-        setSyncBusy(false);
-        updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
-          message: e.message, running: false, error: true });
       }
     });
 
