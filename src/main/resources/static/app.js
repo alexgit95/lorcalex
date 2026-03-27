@@ -807,12 +807,8 @@ async function getTessWorker() {
     if (typeof Tesseract === 'undefined') {
       throw new Error('Tesseract.js non chargé — vérifiez votre connexion internet.');
     }
-    const w = await Tesseract.createWorker('eng', 1, {
-      logger: () => {},
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/worker.min.js',
-      langPath:   'https://tessdata.projectnaptha.com/4.0.0/',
-      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.3/tesseract-core-lstm.wasm.js',
-    });
+    // Pas de chemins personnalisés — Tesseract v4 gère les siennes depuis le CDN déjà chargé
+    const w = await Tesseract.createWorker('eng');
     await w.setParameters({
       tessedit_char_whitelist: '0123456789/.',
       tessedit_pageseg_mode: '7',
