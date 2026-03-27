@@ -889,30 +889,6 @@ function canvasToBlob(canvas) {
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }
 
-// ⚠️ Charge l'image sélectionnée via le sélecteur de fichier et la dessine sur un canvas.
-async function loadFileCanvas() {
-  const input = document.getElementById('scanImageFile');
-  const file = input?.files?.[0];
-  if (!file) throw new Error('Sélectionnez d\'abord une image via le bouton "Choisir une image".');
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        c.width  = img.naturalWidth;
-        c.height = img.naturalHeight;
-        c.getContext('2d').drawImage(img, 0, 0);
-        resolve(c);
-      };
-      img.onerror = () => reject(new Error('Impossible de décoder l\'image sélectionnée.'));
-      img.src = e.target.result;
-    };
-    reader.onerror = () => reject(new Error('Impossible de lire le fichier sélectionné.'));
-    reader.readAsDataURL(file);
-  });
-}
-
 // ── Parsing du code Lorcana ───────────────────────────────────────────────────
 // Format : "N/TOTAL • LANG • SET"  ex : "1/204 • FR • 4"
 function parseCardCode(rawText) {
@@ -1088,52 +1064,17 @@ function renderScanner() {
         <div style="padding:14px 12px;display:flex;flex-direction:column;gap:8px">
           <button class="btn btn-accent btn-full" id="captureBtn">📸 Scanner depuis la caméra</button>
           <button class="btn btn-ghost btn-full" id="scanContinuousBtn">▶ Démarrer le scan continu</button>
-          <div style="display:flex;align-items:center;gap:10px;margin:4px 0">
-            <hr style="flex:1;border:none;border-top:1px solid var(--border)" />
-            <span style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">ou</span>
-            <hr style="flex:1;border:none;border-top:1px solid var(--border)" />
-          </div>
-          <label class="btn btn-ghost btn-full" style="cursor:pointer">
-            🖼️ Choisir une image
-            <input type="file" id="scanImageFile" accept="image/*" style="display:none" />
-          </label>
-          <p id="scanImageName" style="text-align:center;font-size:.72rem;color:var(--text-muted);margin:0">Aucune image sélectionnée</p>
-          <button class="btn btn-ghost btn-full" id="scanImageBtn" disabled>🔍 Lancer l'OCR sur l'image</button>
         </div>`;
       document.getElementById('scanVideo').srcObject = stream;
       document.getElementById('captureBtn').addEventListener('click', () => handleCapture('camera'));
       document.getElementById('scanContinuousBtn').addEventListener('click', toggleContinuousScan);
-      document.getElementById('scanImageBtn').addEventListener('click', () => handleCapture('file'));
-      document.getElementById('scanImageFile').addEventListener('change', e => {
-        const f = e.target.files?.[0];
-        const nameEl = document.getElementById('scanImageName');
-        const imgBtn = document.getElementById('scanImageBtn');
-        if (nameEl) nameEl.textContent = f ? `✔ ${f.name}` : 'Aucune image sélectionnée';
-        if (imgBtn) imgBtn.disabled = !f;
-      });
       updateContinuousButton();
       startContinuousScan();
     })
     .catch(err => {
-      // Caméra indisponible : proposer uniquement le mode fichier
+      // Caméra indisponible : message d'erreur
       cameraArea.innerHTML = `
-        <div class="alert alert-warning" style="margin:12px">Caméra indisponible (${esc(err.message)})</div>
-        <div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:8px">
-          <label class="btn btn-ghost btn-full" style="cursor:pointer">
-            🖼️ Choisir une image
-            <input type="file" id="scanImageFile" accept="image/*" style="display:none" />
-          </label>
-          <p id="scanImageName" style="text-align:center;font-size:.72rem;color:var(--text-muted);margin:0">Aucune image sélectionnée</p>
-          <button class="btn btn-accent btn-full" id="scanImageBtn" disabled>🔍 Lancer l'OCR sur l'image</button>
-        </div>`;
-      document.getElementById('scanImageBtn').addEventListener('click', () => handleCapture('file'));
-      document.getElementById('scanImageFile').addEventListener('change', e => {
-        const f = e.target.files?.[0];
-        const nameEl = document.getElementById('scanImageName');
-        const imgBtn = document.getElementById('scanImageBtn');
-        if (nameEl) nameEl.textContent = f ? `✔ ${f.name}` : 'Aucune image sélectionnée';
-        if (imgBtn) imgBtn.disabled = !f;
-      });
+        <div class="alert alert-warning" style="margin:12px">Caméra indisponible (${esc(err.message)})</div>`;
     });
 
   document.getElementById('manualLookupBtn').addEventListener('click', handleManualLookup);
@@ -1152,26 +1093,18 @@ async function handleCapture(mode, options = {}) {
 
   // Désactiver les deux boutons pendant le scan
   const camBtn = document.getElementById('captureBtn');
-  const imgBtn = document.getElementById('scanImageBtn');
   if (camBtn) camBtn.disabled = true;
-  if (imgBtn) imgBtn.disabled = true;
-  const activeBtn = mode === 'camera' ? camBtn : imgBtn;
+  const activeBtn = camBtn;
 
   try {
     // Étape 1 — Acquisition de l'image (caméra ou fichier)
     if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Capture…`;
     let cardCanvas;
     let sourceLabel;
-    if (mode === 'camera') {
-      const video = document.getElementById('scanVideo');
-      if (!video || !video.videoWidth) throw new Error('Flux vidéo indisponible. Vérifiez que la caméra est active.');
-      cardCanvas = cropToCardFrame(video);
-      sourceLabel = `📸 Caméra (${cardCanvas.width}×${cardCanvas.height} px)`;
-    } else {
-      cardCanvas = await loadFileCanvas();
-      const fileName = document.getElementById('scanImageFile')?.files?.[0]?.name ?? 'image';
-      sourceLabel = `🖼️ ${fileName} (${cardCanvas.width}×${cardCanvas.height} px)`;
-    }
+    const video = document.getElementById('scanVideo');
+    if (!video || !video.videoWidth) throw new Error('Flux vidéo indisponible. Vérifiez que la caméra est active.');
+    cardCanvas = cropToCardFrame(video);
+    sourceLabel = `📸 Caméra (${cardCanvas.width}×${cardCanvas.height} px)`;
 
     const zoneRaw = extractCodeZone(cardCanvas);
 
@@ -1242,11 +1175,9 @@ async function handleCapture(mode, options = {}) {
       const filtered = cards.filter(c => c.editionSetNumber === parsed.setNum);
       if (filtered.length > 0) matchedCards = filtered;
     }
-    if (mode === 'camera') {
-      setScannerCameraVisible(false);
-      setScanAlert('');
-      setScanDebug([]);
-    }
+    setScannerCameraVisible(false);
+    setScanAlert('');
+    setScanDebug([]);
     await handleFoundCards(matchedCards, parsed.cardNum);
     return true;
   } catch (e) {
@@ -1257,8 +1188,6 @@ async function handleCapture(mode, options = {}) {
   } finally {
     _scanState.scanning = false;
     if (camBtn) { camBtn.disabled = false; camBtn.textContent = '📸 Scanner depuis la caméra'; }
-    const fileInput = document.getElementById('scanImageFile');
-    if (imgBtn) { imgBtn.disabled = !fileInput?.files?.[0]; imgBtn.textContent = '🔍 Lancer l\'OCR sur l\'image'; }
   }
 }
 
@@ -1332,8 +1261,8 @@ function renderCardConfirmation(card) {
       </div>
     </div>`;
   document.getElementById('confirmAddBtn').addEventListener('click', async () => {
-    const updated = await autoAddCard(card);
-    if (updated) renderCardConfirmation(updated);
+    await autoAddCard(card);
+    restartScannerCapture();
   });
   document.getElementById('restartScanBtn').addEventListener('click', restartScannerCapture);
 }
