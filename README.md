@@ -12,7 +12,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 | **Collection** | Cartes triées par set et numéro croissants, filtrage possédées/manquantes, recherche, ajout/retrait. Numéro de set affiché sur chaque carte. |
 | **Visualisation carte** | Clic sur une carte → grande image plein-écran, compteur de possession, modification de la quantité directement. |
 | **Statistiques** | Graphiques (donut, barres empilées) : progression globale, par set, par rareté |
-| **Scanner** | Reconnaissance par **empreinte visuelle** (perceptual hash) calculée côté client — aucun OCR, capture de la carte entière. Bip + vibration à l'ajout. |
+| **Scanner** | Scanner **OCR caméra en continu** : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, ajout d'exemplaire, reprise rapide du scan. |
 | **Administration** | Import du catalogue LorcaJson (par URL ou fichier), import/export JSON de la collection |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion |
 
@@ -37,7 +37,7 @@ lorcalex-main/
         ├── application-docker.properties       # PostgreSQL (prod)
         └── static/                             # Frontend vanilla (servi par Spring Boot)
             ├── index.html
-            ├── app.js                          # Logique SPA complète (router, pages, API, scanner hash)
+          ├── app.js                          # Logique SPA complète (router, pages, API, scanner OCR continu)
             └── app.css                         # Styles
 ```
 
@@ -127,7 +127,7 @@ APP_PORT=8181
 2. Ouvrir **Administration → 📂 Import depuis un fichier**.
 3. Sélectionner le fichier téléchargé.
 
-> **Note :** Lors de l'import, le serveur télécharge chaque vignette de carte pour calculer son **empreinte visuelle** (perceptual hash). Cette opération peut prendre plusieurs minutes selon le nombre de sets importés.
+> **Note :** Le scanner actuel fonctionne via OCR du code imprimé sur la carte. Le calcul d'empreintes visuelles côté serveur est conservé comme fonctionnalité de maintenance/compatibilité.
 
 ---
 
@@ -157,26 +157,29 @@ Cliquer sur une carte dans la collection ouvre un écran détail avec :
 
 ---
 
-## Scanner de cartes (empreinte visuelle)
+## Scanner de cartes (OCR continu caméra)
 
 ### Principe
 
-1. **À l'import** : le serveur calcule un *average hash* 8×8 (64 bits) pour chaque vignette de carte.
-2. **Au scan** : le client charge toutes les empreintes (`GET /api/cards/fingerprints`), capture la carte entière via la caméra, calcule son hash et trouve la carte la plus proche (distance de Hamming).
-3. Tout le calcul de comparaison s'effectue **100 % côté client** (JavaScript / BigInt).
+1. Le scanner capture la carte dans le cadre caméra puis extrait la zone de code située en bas-gauche.
+2. Un OCR (Tesseract.js v5) lit le format imprimé : `N/TOTAL • FR • SET`.
+3. L'application cherche la carte via son numéro puis affine par numéro de set quand disponible.
+4. En mode continu, la capture tourne en boucle et s'arrête automatiquement dès qu'une carte est reconnue.
 
 ### Utilisation
 
 1. Ouvrir **Scanner**.
-2. Centrer la carte **entière** dans le cadre (portrait, fond uni de préférence).
-3. Appuyer sur **📷 Identifier la carte**.
-4. La carte reconnue est ajoutée automatiquement (bip + vibration).
+2. Présenter la carte dans le cadre caméra.
+3. Le scan continu démarre automatiquement et s'arrête dès qu'une carte est détectée (bip + vibration).
+4. La vue caméra disparaît pour afficher uniquement la carte détectée, la quantité déjà en collection, puis :
+  - **Ajouter un exemplaire** : ajoute 1 exemplaire, puis relance automatiquement la caméra + scan continu.
+  - **Recommencer** : revient à la caméra et relance le scan.
 
-> **Pré-requis** : le catalogue doit avoir été importé au moins une fois pour que les empreintes soient disponibles.
+> **Pré-requis** : le catalogue doit avoir été importé au moins une fois pour que les cartes soient disponibles en base.
 
 ### Fallback manuel
 
-Si la reconnaissance échoue (mauvaise luminosité, reflet), utilisez la saisie du **numéro de carte** situé en bas de la zone de champ de la carte.
+Si la reconnaissance échoue (mauvaise luminosité, reflet, code flou), utilisez la saisie manuelle du **numéro de carte** et du **set** dans l'écran scanner.
 
 ---
 
@@ -191,7 +194,7 @@ Toutes les routes nécessitent un Bearer JWT (sauf `/api/auth/login`).
 | `GET` | `/api/cards?editionId=&q=` | Cartes filtrées (triées set+numéro) |
 | `GET` | `/api/cards/{id}` | Détail carte |
 | `GET` | `/api/cards/lookup?number=&editionId=` | Lookup par numéro (scanner) |
-| `GET` | `/api/cards/fingerprints` | Empreintes légères pour scanner client |
+| `GET` | `/api/cards/fingerprints` | Empreintes visuelles (compatibilité / maintenance) |
 | `GET/POST` | `/api/collection` | Collection possédée |
 | `PUT` | `/api/collection/{cardId}` | Modifier quantité |
 | `DELETE` | `/api/collection/{cardId}` | Supprimer de la collection |
@@ -228,6 +231,25 @@ Importe un fichier précédemment exporté.
 - Si la carte est déjà dans la collection → quantité **mise à jour**.  
 - Si la carte est inconnue → entrée **ignorée**.  
 - Les cartes absentes du fichier **ne sont pas supprimées**.
+
+---
+
+## Changelog scanner
+
+### Version actuelle (OCR caméra continu)
+
+- Scan **100 % caméra** (mode image supprimé).
+- OCR du code imprimé en bas-gauche : `N/TOTAL • FR • SET`.
+- Boucle de scan continue avec arrêt automatique dès qu'une carte est reconnue.
+- Bip + vibration à la détection.
+- Vue résultat focalisée (caméra masquée) avec quantité en collection.
+- Action **Ajouter un exemplaire** puis retour automatique caméra + relance du scan continu.
+- Action **Recommencer** pour relancer immédiatement une nouvelle détection.
+
+### Historique récent
+
+- Migration Tesseract.js v4 → v5 pour corriger les erreurs WASM (`SetImageFile, e is null`).
+- Passage d'un scan ponctuel manuel à un flux continu optimisé mobile.
 
 
 ## Sécurité
