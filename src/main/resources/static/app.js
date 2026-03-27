@@ -94,8 +94,8 @@ const api = {
 
   computeHashes: () => apiFetch('/admin/compute-hashes', { method: 'POST' }),
 
-  exportCollection: () => apiFetch('/admin/export'),
-  importCollection: (data) => apiFetch('/admin/import', { method: 'POST', body: JSON.stringify(data) }),
+  fullBackup: () => apiFetch('/admin/backup'),
+  fullRestore: (data) => apiFetch('/admin/restore', { method: 'POST', body: JSON.stringify(data) }),
   importCompanionCollection: (file, merge = true) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -1477,18 +1477,19 @@ function renderAdmin() {
       <!-- Progression -->
       <div id="adminProgressBox" class="edition-item" style="margin-bottom:12px;display:none"></div>
 
-      <!-- Collection Import / Export -->
+      <!-- Sauvegarde / Restauration complètes -->
       <div class="edition-item" style="margin-bottom:12px">
-        <h3 style="margin-bottom:12px">Collection — Import / Export</h3>
+        <h3 style="margin-bottom:12px">💾 Sauvegarde &amp; Restauration complètes</h3>
         <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
-          Sauvegardez ou restaurez l'intégralité de votre collection au format JSON.
+          Exporte <strong>tout</strong> : catalogue de cartes, collection et paramètres (dont les sets suivis dans Stats).
+          Permet une restauration intégrale sur une nouvelle instance.
         </p>
-        <button class="btn btn-ghost btn-full" id="exportBtn" style="margin-bottom:8px">⬇️ Exporter la collection (JSON)</button>
+        <button class="btn btn-accent btn-full" id="fullBackupBtn" style="margin-bottom:8px">⬇️ Télécharger la sauvegarde complète</button>
         <label class="btn btn-ghost btn-full" style="cursor:pointer;margin-bottom:0">
-          ⬆️ Importer une collection (JSON)
-          <input type="file" id="importFile" accept=".json" style="display:none" />
+          🔄 Restaurer depuis une sauvegarde
+          <input type="file" id="fullRestoreFile" accept=".json" style="display:none" />
         </label>
-        <div id="importExportResult" style="margin-top:8px"></div>
+        <div id="fullBackupResult" style="margin-top:8px"></div>
       </div>
 
       <!-- Companion Import -->
@@ -1650,35 +1651,41 @@ function renderAdmin() {
       }
     });
 
-    // ── Export collection ──────────────────────────────────────────────────
-    document.getElementById('exportBtn').addEventListener('click', async () => {
+    // ── Sauvegarde complète ────────────────────────────────────────────────
+    document.getElementById('fullBackupBtn').addEventListener('click', async () => {
       try {
-        const data = await api.exportCollection();
+        const data = await api.fullBackup();
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `lorcalex-export-${new Date().toISOString().slice(0, 10)}.json`;
+        a.download = `lorcalex-backup-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
-        showAdminResult('importExportResult', { success: true, message: `${data.totalEntries} carte(s) exportée(s).` });
+        showAdminResult('fullBackupResult', { success: true, message: `Sauvegarde complète : ${data.totalCards} carte(s), ${data.totalCollection} en collection, ${(data.settings || []).length} paramètre(s).` });
       } catch (e) {
-        showAdminResult('importExportResult', { success: false, message: 'Erreur export : ' + e.message });
+        showAdminResult('fullBackupResult', { success: false, message: 'Erreur sauvegarde : ' + e.message });
       }
     });
 
-    // ── Import collection ──────────────────────────────────────────────────
-    document.getElementById('importFile').addEventListener('change', async (e) => {
+    // ── Restauration complète ─────────────────────────────────────────────
+    document.getElementById('fullRestoreFile').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      if (!confirm('⚠️ ATTENTION : cette opération va EFFACER et remplacer toutes les données (cartes, collection, paramètres). Cette action est irréversible.\n\nContinuer ?')) {
+        e.target.value = '';
+        return;
+      }
+      showAdminResult('fullBackupResult', { success: true, message: '⏳ Restauration en cours, veuillez patienter…' });
       try {
         const text = await file.text();
         const data = JSON.parse(text);
-        const result = await api.importCollection(data);
-        showAdminResult('importExportResult', result);
+        const result = await api.fullRestore(data);
+        showAdminResult('fullBackupResult', result);
         collState.cards = [];
+        collState.editions = [];
       } catch (err) {
-        showAdminResult('importExportResult', { success: false, message: 'Erreur import : ' + err.message });
+        showAdminResult('fullBackupResult', { success: false, message: 'Erreur restauration : ' + err.message });
       } finally {
         e.target.value = '';
       }

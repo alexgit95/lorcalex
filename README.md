@@ -13,7 +13,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 | **Visualisation carte** | Clic sur une carte → grande image plein-écran, compteur de possession, modification de la quantité directement. |
 | **Statistiques** | Graphiques (donut, barres empilées) : progression globale, par set, par rareté |
 | **Scanner** | Scanner **OCR caméra en continu** : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, ajout d'exemplaire, reprise rapide du scan. |
-| **Administration** | Import du catalogue LorcaJson (URL/fichier), import/export JSON de la collection, import **Lorcana Companion** (mode fusion/remplacement) avec barre de progression |
+| **Administration** | Import du catalogue LorcaJson (URL/fichier), **sauvegarde/restauration complètes** (catalogue + collection + paramètres), export/import JSON de la collection, import **Lorcana Companion** (mode fusion/remplacement) avec barre de progression |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion |
 
 ---
@@ -204,35 +204,57 @@ Toutes les routes nécessitent un Bearer JWT (sauf `/api/auth/login`).
 | `POST` | `/api/admin/sync/url` | Import LorcaJson depuis URL |
 | `POST` | `/api/admin/sync/file` | Import LorcaJson depuis fichier multipart |
 | `GET` | `/api/admin/lorcajson-url` | URL LorcaJson configurée |
-| `GET` | `/api/admin/export` | Export JSON de la collection |
-| `POST` | `/api/admin/import` | Import JSON de la collection |
-| `POST` | `/api/admin/import/companion?merge=true|false` | Import Companion (asynchrone) avec mode fusion/remplacement |
+| `GET` | `/api/admin/backup` | Sauvegarde complète (éditions + cartes + collection + paramètres) |
+| `POST` | `/api/admin/restore` | Restauration complète depuis une sauvegarde |
+| `POST` | `/api/admin/import/companion?merge=true\|false` | Import Companion (asynchrone) avec mode fusion/remplacement |
 
 ---
 
-## Import / Export de la collection
+## Sauvegarde & Restauration complètes
 
-Accessible depuis **Administration → Collection — Import / Export**.
+Accessible depuis **Administration → 💾 Sauvegarde & Restauration complètes**.
 
-### Export
-Génère un fichier `lorcalex-export-YYYY-MM-DD.json` :
+Cette fonctionnalité permet de **sauvegarder l'intégralité de l'application** et de la **restaurer sur une instance vierge**, sans avoir à re-synchroniser le catalogue LorcaJson.
+
+### Contenu de la sauvegarde
+
+| Donnée | Description |
+|--------|-------------|
+| `editions` | Tous les sets (code, nom, numéro, date de sortie, URL logo…) |
+| `cards` | L'intégralité du catalogue de cartes (tous les champs, dont `externalId` et `imageHash`) |
+| `collection` | Vos quantités possédées par carte |
+| `settings` | Tous les paramètres (dont `stats_enabled_sets` : les sets suivis dans l'onglet Stats) |
+
+### Format du fichier
 
 ```json
 {
-  "exportDate": "2026-03-27T10:00:00",
-  "version": "1",
-  "totalEntries": 42,
-  "collection": [
-    { "cardNumber": 1, "editionCode": "1", "cardName": "Ariel - Sur des jambes humaines", "rarity": "Inhabituelle", "quantity": 2 }
-  ]
+  "backupDate": "2026-03-27T10:00:00",
+  "version": "2",
+  "totalEditions": 10,
+  "totalCards": 2048,
+  "totalCollection": 350,
+  "editions": [ { "id": 1, "code": "TFC", "name": "Premier Chapitre", "setNumber": 1, ... } ],
+  "cards":    [ { "externalId": "abc123", "cardNumber": 1, "editionCode": "TFC", "imageHash": 12345, ... } ],
+  "collection": [ { "externalId": "abc123", "cardNumber": 1, "editionCode": "TFC", "quantity": 2 } ],
+  "settings": [ { "key": "stats_enabled_sets", "value": "1,2,3", "description": "..." } ]
 }
 ```
 
-### Import
-Importe un fichier précédemment exporté.  
-- Si la carte est déjà dans la collection → quantité **mise à jour**.  
-- Si la carte est inconnue → entrée **ignorée**.  
-- Les cartes absentes du fichier **ne sont pas supprimées**.
+### Sauvegarde
+
+Cliquer **⬇️ Télécharger la sauvegarde complète** → génère `lorcalex-backup-YYYY-MM-DD.json`.
+
+### Restauration
+
+1. Cliquer **🔄 Restaurer depuis une sauvegarde** et sélectionner le fichier de backup.
+2. **Une confirmation est demandée** — l'opération est irréversible.
+3. La restauration :
+   - **Efface** tout : collection, cartes, éditions, paramètres.
+   - **Recrée** tout depuis le fichier dans le bon ordre.
+   - **Remappe automatiquement** les IDs d'éditions dans `stats_enabled_sets` (les IDs peuvent changer après recréation).
+
+> **Utilisation typique** : migration vers un nouveau serveur, récupération après une réinitialisation de la base de données.
 
 ---
 

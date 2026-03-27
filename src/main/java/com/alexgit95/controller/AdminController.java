@@ -10,11 +10,13 @@ import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.LorcaJsonService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -115,86 +117,6 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("url", lorcaJsonService.getLorcaJsonUrl()));
     }
 
-    @GetMapping("/export")
-    public ResponseEntity<Map<String, Object>> exportCollection() {
-        List<Map<String, Object>> items = userCollectionRepository.findAll().stream()
-                .map(uc -> {
-                    Map<String, Object> entry = new LinkedHashMap<>();
-                    entry.put("cardNumber", uc.getCard().getCardNumber());
-                    entry.put("editionCode", uc.getCard().getEdition().getCode());
-                    entry.put("cardName", uc.getCard().getName());
-                    entry.put("rarity", uc.getCard().getRarity() != null ? uc.getCard().getRarity() : "");
-                    entry.put("quantity", uc.getQuantity());
-                    return entry;
-                })
-                .collect(Collectors.toList());
-
-        Map<String, Object> export = new LinkedHashMap<>();
-        export.put("exportDate", LocalDateTime.now().toString());
-        export.put("version", "1");
-        export.put("totalEntries", items.size());
-        export.put("collection", items);
-
-        return ResponseEntity.ok()
-                .header("Content-Disposition", "attachment; filename=\"lorcalex-export.json\"")
-                .body(export);
-    }
-
-    @SuppressWarnings("unchecked")
-    @PostMapping("/import")
-    public ResponseEntity<Map<String, Object>> importCollection(@RequestBody Map<String, Object> body) {
-        List<Map<String, Object>> items;
-        try {
-            items = (List<Map<String, Object>>) body.get("collection");
-            if (items == null) throw new IllegalArgumentException("Missing 'collection' key");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "success", false,
-                    "message", "Format invalide : clé 'collection' manquante ou incorrecte."
-            ));
-        }
-
-        int imported = 0;
-        int skipped = 0;
-
-        for (Map<String, Object> entry : items) {
-            try {
-                Object rawNumber = entry.get("cardNumber");
-                String editionCode = (String) entry.get("editionCode");
-                Object rawQty = entry.get("quantity");
-
-                if (rawNumber == null || editionCode == null || rawQty == null) { skipped++; continue; }
-
-                int cardNumber = ((Number) rawNumber).intValue();
-                int quantity   = ((Number) rawQty).intValue();
-                if (quantity <= 0) { skipped++; continue; }
-
-                Optional<Edition> editionOpt = editionRepository.findByCode(editionCode);
-                if (editionOpt.isEmpty()) { skipped++; continue; }
-
-                Optional<Card> cardOpt = cardRepository.findByCardNumberAndEdition(cardNumber, editionOpt.get());
-                if (cardOpt.isEmpty()) { skipped++; continue; }
-
-                Card card = cardOpt.get();
-                UserCollection uc = userCollectionRepository.findByCardId(card.getId())
-                        .orElse(new UserCollection());
-                uc.setCard(card);
-                uc.setQuantity(quantity);
-                userCollectionRepository.save(uc);
-                imported++;
-            } catch (Exception e) {
-                skipped++;
-            }
-        }
-
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "imported", imported,
-                "skipped", skipped,
-                "message", imported + " carte(s) importée(s), " + skipped + " ignorée(s)."
-        ));
-    }
-
     @PostMapping("/import/companion")
     public ResponseEntity<Map<String, Object>> importCompanionCollection(
             @RequestParam("file") MultipartFile file,
@@ -227,5 +149,194 @@ public class AdminController {
                     "message", "Impossible de lire le fichier Companion : " + e.getMessage()
             ));
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BACKUP COMPLET (éditions + cartes + collection + settings)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @GetMapping("/backup")
+    public ResponseEntity<Map<String, Object>> fullBackup() {
+        List<Map<String, Object>> editionsData = editionRepository.findAll().stream()
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", e.getId());
+                    m.put("code", e.getCode());
+                    m.put("name", e.getName());
+                    m.put("totalCards", e.getTotalCards());
+                    m.put("releaseDate", e.getReleaseDate());
+                    m.put("logoUrl", e.getLogoUrl());
+                    m.put("setNumber", e.getSetNumber());
+                    return m;
+                }).collect(Collectors.toList());
+
+        List<Map<String, Object>> cardsData = cardRepository.findAll().stream()
+                .map(c -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("externalId", c.getExternalId());
+                    m.put("cardNumber", c.getCardNumber());
+                    m.put("editionCode", c.getEdition() != null ? c.getEdition().getCode() : null);
+                    m.put("name", c.getName());
+                    m.put("rarity", c.getRarity());
+                    m.put("cost", c.getCost());
+                    m.put("inkColor", c.getInkColor());
+                    m.put("type", c.getType());
+                    m.put("subtypes", c.getSubtypes());
+                    m.put("bodyText", c.getBodyText());
+                    m.put("flavorText", c.getFlavorText());
+                    m.put("imageUrl", c.getImageUrl());
+                    m.put("thumbnailUrl", c.getThumbnailUrl());
+                    m.put("artist", c.getArtist());
+                    m.put("inkable", c.getInkable());
+                    m.put("imageHash", c.getImageHash());
+                    return m;
+                }).collect(Collectors.toList());
+
+        List<Map<String, Object>> collectionData = userCollectionRepository.findAllWithCard().stream()
+                .map(uc -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("externalId", uc.getCard().getExternalId());
+                    m.put("cardNumber", uc.getCard().getCardNumber());
+                    m.put("editionCode", uc.getCard().getEdition() != null ? uc.getCard().getEdition().getCode() : null);
+                    m.put("quantity", uc.getQuantity());
+                    return m;
+                }).collect(Collectors.toList());
+
+        List<Map<String, Object>> settingsData = settingsRepository.findAll().stream()
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("key", s.getSettingKey());
+                    m.put("value", s.getSettingValue());
+                    m.put("description", s.getDescription());
+                    return m;
+                }).collect(Collectors.toList());
+
+        Map<String, Object> backup = new LinkedHashMap<>();
+        backup.put("backupDate", LocalDateTime.now().toString());
+        backup.put("version", "2");
+        backup.put("totalEditions", editionsData.size());
+        backup.put("totalCards", cardsData.size());
+        backup.put("totalCollection", collectionData.size());
+        backup.put("editions", editionsData);
+        backup.put("cards", cardsData);
+        backup.put("collection", collectionData);
+        backup.put("settings", settingsData);
+
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"lorcalex-backup.json\"")
+                .body(backup);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Transactional
+    @PostMapping("/restore")
+    public ResponseEntity<Map<String, Object>> fullRestore(@RequestBody Map<String, Object> body) {
+        List<Map<String, Object>> editionsRaw    = (List<Map<String, Object>>) body.getOrDefault("editions", List.of());
+        List<Map<String, Object>> cardsRaw       = (List<Map<String, Object>>) body.getOrDefault("cards",    List.of());
+        List<Map<String, Object>> collectionRaw  = (List<Map<String, Object>>) body.getOrDefault("collection", List.of());
+        List<Map<String, Object>> settingsRaw    = (List<Map<String, Object>>) body.getOrDefault("settings", List.of());
+
+        // 1. Supprimer dans l'ordre des dépendances
+        userCollectionRepository.deleteAllInBatch();
+        cardRepository.deleteAllInBatch();
+        editionRepository.deleteAllInBatch();
+        settingsRepository.deleteAllInBatch();
+
+        // 2. Restaurer les éditions — conserver le mapping ancien ID → nouvelle Edition
+        Map<Long, Edition> oldIdToNewEdition = new LinkedHashMap<>();
+        Map<String, Edition> editionByCode   = new LinkedHashMap<>();
+
+        for (Map<String, Object> e : editionsRaw) {
+            Edition edition = new Edition();
+            edition.setCode((String) e.get("code"));
+            edition.setName((String) e.get("name"));
+            if (e.get("totalCards") != null)  edition.setTotalCards(((Number) e.get("totalCards")).intValue());
+            if (e.get("setNumber")  != null)  edition.setSetNumber(((Number) e.get("setNumber")).intValue());
+            edition.setReleaseDate((String) e.get("releaseDate"));
+            edition.setLogoUrl((String) e.get("logoUrl"));
+            edition = editionRepository.save(edition);
+            if (e.get("id") != null) oldIdToNewEdition.put(((Number) e.get("id")).longValue(), edition);
+            if (edition.getCode() != null) editionByCode.put(edition.getCode(), edition);
+        }
+
+        // 3. Restaurer les cartes
+        Map<String, Card> cardByExternalId     = new LinkedHashMap<>();
+        Map<String, Card> cardByNumberAndCode  = new LinkedHashMap<>();
+
+        for (Map<String, Object> c : cardsRaw) {
+            String edCode = (String) c.get("editionCode");
+            Edition edition = edCode != null ? editionByCode.get(edCode) : null;
+            if (edition == null) continue;
+
+            Card card = new Card();
+            card.setName((String) c.get("name"));
+            card.setEdition(edition);
+            card.setExternalId((String) c.get("externalId"));
+            if (c.get("cardNumber") != null) card.setCardNumber(((Number) c.get("cardNumber")).intValue());
+            card.setRarity((String) c.get("rarity"));
+            if (c.get("cost")      != null) card.setCost(((Number) c.get("cost")).intValue());
+            card.setInkColor((String) c.get("inkColor"));
+            card.setType((String) c.get("type"));
+            card.setSubtypes((String) c.get("subtypes"));
+            card.setBodyText((String) c.get("bodyText"));
+            card.setFlavorText((String) c.get("flavorText"));
+            card.setImageUrl((String) c.get("imageUrl"));
+            card.setThumbnailUrl((String) c.get("thumbnailUrl"));
+            card.setArtist((String) c.get("artist"));
+            if (c.get("inkable")   != null) card.setInkable((Boolean) c.get("inkable"));
+            if (c.get("imageHash") != null) card.setImageHash(((Number) c.get("imageHash")).longValue());
+            card = cardRepository.save(card);
+            if (card.getExternalId() != null) cardByExternalId.put(card.getExternalId(), card);
+            if (card.getCardNumber() != null && edCode != null)
+                cardByNumberAndCode.put(card.getCardNumber() + ":" + edCode, card);
+        }
+
+        // 4. Restaurer la collection
+        int collectionRestored = 0;
+        for (Map<String, Object> entry : collectionRaw) {
+            String exId   = (String) entry.get("externalId");
+            String edCode = (String) entry.get("editionCode");
+            Object rawNum = entry.get("cardNumber");
+            Object rawQty = entry.get("quantity");
+            if (rawQty == null) continue;
+
+            Card card = null;
+            if (exId != null) card = cardByExternalId.get(exId);
+            if (card == null && rawNum != null && edCode != null)
+                card = cardByNumberAndCode.get(((Number) rawNum).intValue() + ":" + edCode);
+            if (card == null) continue;
+
+            UserCollection uc = new UserCollection();
+            uc.setCard(card);
+            uc.setQuantity(((Number) rawQty).intValue());
+            userCollectionRepository.save(uc);
+            collectionRestored++;
+        }
+
+        // 5. Restaurer les settings et remap les IDs d'éditions dans stats_enabled_sets
+        for (Map<String, Object> s : settingsRaw) {
+            String key   = (String) s.get("key");
+            String value = (String) s.get("value");
+            if (key == null) continue;
+            if ("stats_enabled_sets".equals(key) && value != null && !oldIdToNewEdition.isEmpty()) {
+                value = Arrays.stream(value.split(","))
+                        .map(String::trim).filter(p -> !p.isEmpty())
+                        .map(p -> {
+                            try {
+                                Edition newEd = oldIdToNewEdition.get(Long.parseLong(p));
+                                return newEd != null ? newEd.getId().toString() : p;
+                            } catch (NumberFormatException ex) { return p; }
+                        })
+                        .collect(Collectors.joining(","));
+            }
+            settingsRepository.save(new AppSettings(key, value, (String) s.get("description")));
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", editionsRaw.size() + " édition(s), " + cardsRaw.size() + " carte(s), "
+                        + collectionRestored + " entrée(s) de collection, "
+                        + settingsRaw.size() + " paramètre(s) restaurés."
+        ));
     }
 }
