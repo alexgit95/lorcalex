@@ -758,6 +758,40 @@ function stopCamera() {
   }
 }
 
+// Recadre le flux vidéo sur la zone du cadre carte affiché à l'écran.
+// Tient compte de object-fit:cover pour convertir les coordonnées écran → pixels natifs.
+function cropToCardFrame(video) {
+  const frame = document.querySelector('.scanner-card-frame');
+  if (!frame || !video.videoWidth) {
+    // Fallback : frame entière
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth || 640; c.height = video.videoHeight || 480;
+    c.getContext('2d').drawImage(video, 0, 0);
+    return c;
+  }
+  const vR = video.getBoundingClientRect();
+  const fR = frame.getBoundingClientRect();
+  const dW = vR.width, dH = vR.height;
+  const nW = video.videoWidth, nH = video.videoHeight;
+  // object-fit:cover — le facteur d'échelle garde les deux dimensions >= container
+  const s = Math.max(dW / nW, dH / nH);
+  // Décalage de centrage (en px écran) côté clippé
+  const ox = (nW * s - dW) / 2;
+  const oy = (nH * s - dH) / 2;
+  // Position du cadre par rapport à la vidéo
+  const fLeft = fR.left - vR.left;
+  const fTop  = fR.top  - vR.top;
+  // Conversion vers coordonnées natives
+  const cropX = Math.max(0, (fLeft + ox) / s);
+  const cropY = Math.max(0, (fTop  + oy) / s);
+  const cropW = Math.min(nW - cropX, fR.width  / s);
+  const cropH = Math.min(nH - cropY, fR.height / s);
+  const c = document.createElement('canvas');
+  c.width = Math.round(cropW);  c.height = Math.round(cropH);
+  c.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, c.width, c.height);
+  return c;
+}
+
 // Perceptual hash (average hash) — computed entirely client-side
 function computeAHash(sourceCanvas, hashSize = 8) {
   const small = document.createElement('canvas');
@@ -813,8 +847,9 @@ function findBestMatch(queryHash, fingerprints) {
   return best ? { ...best, distance: bestDist } : null;
 }
 
-// Max Hamming distance to accept a match (out of 64 bits)
-const MATCH_THRESHOLD = 20;
+// Max Hamming distance to accept a match (out of 64 bits).
+// La valeur de 15 est moins permissive grâce au recadrage précis sur le cadre carte.
+const MATCH_THRESHOLD = 15;
 
 let _scanState = { scanning: false };
 
@@ -893,13 +928,17 @@ async function handleCapture() {
 
     btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Analyse…`;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-
-    const queryHash = computeAHash(canvas);
-    const match = findBestMatch(queryHash, fingerprints);
+    // Capture 3 frames consécutives et retient la meilleure correspondance
+    let bestMatch = null;
+    let bestDist  = Infinity;
+    for (let frame = 0; frame < 3; frame++) {
+      if (frame > 0) await new Promise(r => setTimeout(r, 80));
+      const cropped   = cropToCardFrame(video);
+      const queryHash = computeAHash(cropped);
+      const m = findBestMatch(queryHash, fingerprints);
+      if (m && m.distance < bestDist) { bestDist = m.distance; bestMatch = m; }
+    }
+    const match = bestMatch;
 
     if (!match || match.distance > MATCH_THRESHOLD) {
       setScanAlert(`Carte non reconnue (score: ${match?.distance ?? '?'}/64). Essayez un meilleur éclairage ou la saisie manuelle.`, 'error');
@@ -937,7 +976,7 @@ async function handleFoundCards(cards, num) {
   if (cards.length === 0) {
     setScanAlert(`Carte #${num} non trouvée. Importez d'abord le catalogue via Administration.`, 'error');
   } else if (cards.length === 1) {
-    await autoAddCard(cards[0]);
+    renderCardConfirmation(cards[0]);
   } else {
     renderFoundCards(cards);
   }
@@ -956,6 +995,44 @@ async function autoAddCard(card) {
   navigator.vibrate?.([100, 50, 100]);
 }
 
+// Affiche la carte trouvée avec une image et un bouton de confirmation avant ajout.
+function renderCardConfirmation(card) {
+  const area = document.getElementById('foundCardsArea');
+  if (!area) return;
+  setScanAlert('');
+  const imgHtml = card.imageUrl
+    ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)" onerror="this.style.display='none'" />`
+    : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem">🃏</div>`;
+  const alreadyOwned = card.owned
+    ? `<div style="font-size:.78rem;color:var(--success);margin-top:6px">✓ Déjà en collection (×${card.quantity})</div>`
+    : '';
+  area.innerHTML = `
+    <div style="padding:12px">
+      <h3 style="font-size:.85rem;color:var(--text-muted);text-align:center;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Carte identifiée — confirmer ?</h3>
+      <div style="display:flex;gap:14px;align-items:flex-start">
+        ${imgHtml}
+        <div style="flex:1">
+          <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
+          <div style="font-size:.78rem;color:var(--primary-light);font-weight:700;margin-top:4px">${esc(card.editionCode)}</div>
+          <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">#${esc(String(card.cardNumber))} · ${esc(card.rarity)}</div>
+          ${alreadyOwned}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-accent btn-full" id="confirmAddBtn">${card.owned ? '+ Ajouter un exemplaire' : '✓ Ajouter à la collection'}</button>
+        <button class="btn btn-ghost" id="cancelConfirmBtn" style="flex-shrink:0;padding:0 14px">✕</button>
+      </div>
+    </div>`;
+  document.getElementById('confirmAddBtn').addEventListener('click', async () => {
+    area.innerHTML = '';
+    await autoAddCard(card);
+  });
+  document.getElementById('cancelConfirmBtn').addEventListener('click', () => {
+    area.innerHTML = '';
+    setScanAlert('Annulé.', 'info');
+  });
+}
+
 function renderFoundCards(cards) {
   const area = document.getElementById('foundCardsArea');
   if (!area) return;
@@ -971,10 +1048,9 @@ function renderFoundCards(cards) {
       </button>`).join('')}
   </div>`;
   area.querySelectorAll('[data-cardid]').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const card = cards.find(c => c.id === parseInt(btn.dataset.cardid));
-      area.innerHTML = '';
-      await autoAddCard(card);
+      renderCardConfirmation(card);
     });
   });
 }
