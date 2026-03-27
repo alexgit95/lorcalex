@@ -1000,6 +1000,8 @@ async function startContinuousScan() {
         keepFoundArea: true,
       });
       if (matched) {
+        playBeep(1200, 180);
+        navigator.vibrate?.([120]);
         _scanState.continuous = false;
         updateContinuousButton();
         return;
@@ -1273,14 +1275,9 @@ async function handleFoundCards(cards, num) {
 }
 
 async function autoAddCard(card) {
-  if (card.owned) {
-    setScanAlert(`"${card.name}" déjà dans la collection (×${card.quantity})`, 'success');
-    playBeep(440, 150);
-    navigator.vibrate?.([50]);
-    return;
-  }
-  await api.addToCollection(card.id, 1);
-  setScanAlert(`✓ "${card.name}" ajoutée à la collection !`, 'success');
+  const updated = await api.addToCollection(card.id, 1);
+  collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity})`, 'success');
   playBeep(880, 200);
   navigator.vibrate?.([100, 50, 100]);
 }
