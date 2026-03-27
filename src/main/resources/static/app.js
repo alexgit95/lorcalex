@@ -792,43 +792,92 @@ function cropToCardFrame(video) {
   return c;
 }
 
-// Perceptual hash (average hash) — computed entirely client-side
-function computeAHash(sourceCanvas, hashSize = 8) {
-  const small = document.createElement('canvas');
-  small.width = hashSize;
-  small.height = hashSize;
-  const ctx = small.getContext('2d');
-  ctx.drawImage(sourceCanvas, 0, 0, hashSize, hashSize);
-  const data = ctx.getImageData(0, 0, hashSize, hashSize).data;
+// ─── Scanner OCR — lecture du code en bas à gauche de la carte ───────────────
+// Format Lorcana FR : "N/TOTAL · FR · SET"  ex : "1/204 · FR · 4"
 
-  const grays = new Array(hashSize * hashSize);
-  let sum = 0;
-  for (let i = 0; i < grays.length; i++) {
-    const g = Math.round(0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]);
-    grays[i] = g;
-    sum += g;
+let _tessWorker = null;
+
+// Initialise le worker Tesseract (chargé une seule fois, conservé en mémoire).
+async function getTessWorker() {
+  if (_tessWorker) return _tessWorker;
+  _tessWorker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
+  await _tessWorker.setParameters({
+    tessedit_char_whitelist: '0123456789/·•. FR',
+    tessedit_pageseg_mode: '7', // single text line
+  });
+  return _tessWorker;
+}
+
+// Extrait la zone bas-gauche de la carte et l'agrandit pour l'OCR.
+// Le scan se fait sur la carte entière ; on recadre ici en post-traitement.
+function extractCodeZone(cardCanvas, scale = 6) {
+  const sw = cardCanvas.width, sh = cardCanvas.height;
+  // Zone : bas 15 % de la hauteur, gauche 50 % de la largeur
+  const zW = Math.round(sw * 0.50), zH = Math.round(sh * 0.15);
+  const zY = sh - zH;
+  const out = document.createElement('canvas');
+  out.width  = zW * scale;
+  out.height = zH * scale;
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(cardCanvas, 0, zY, zW, zH, 0, 0, out.width, out.height);
+  // Grayscale + étirement de contraste pour améliorer la lisibilité
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+  let minG = 255, maxG = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
+    if (g < minG) minG = g;
+    if (g > maxG) maxG = g;
   }
-  const avg = sum / grays.length;
-  let hash = 0n;
-  for (let i = 0; i < grays.length; i++) {
-    if (grays[i] >= avg) hash |= (1n << BigInt(i));
+  const range = Math.max(1, maxG - minG);
+  for (let i = 0; i < d.length; i += 4) {
+    const g = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
+    const v = Math.round(((g - minG) / range) * 255);
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
   }
-  return hash;
+  ctx.putImageData(img, 0, 0);
+  return out;
 }
 
-function hammingDistance(a, b) {
-  let diff = a ^ b;
-  let count = 0;
-  while (diff > 0n) { count += Number(diff & 1n); diff >>= 1n; }
-  return count;
+// Retourne un canvas inversé (noir ↔ blanc) pour gérer texte clair sur fond sombre.
+function invertCanvas(src) {
+  const out = document.createElement('canvas');
+  out.width = src.width; out.height = src.height;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2];
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
 }
 
-function hexToBigInt(hex) {
-  if (!hex) return 0n;
-  return BigInt('0x' + hex);
+// Parse le texte OCR et extrait le numéro de carte + numéro de set.
+function parseCardCode(text) {
+  // Corrections d'OCR classiques
+  const clean = text
+    .replace(/[oO]/g, '0')
+    .replace(/[lI|!]/g, '1')
+    .replace(/[–—―]/g, '/')
+    .replace(/\s+/g, ' ');
+  const m = clean.match(/(\d{1,3})\s*[\/\\]\s*(\d{1,3})/);
+  if (!m) return null;
+  const cardNum = parseInt(m[1]);
+  const total   = parseInt(m[2]);
+  if (isNaN(cardNum) || cardNum < 1 || cardNum > 500) return null;
+  if (!isNaN(total) && total > 0 && total > 500) return null;
+  // Le numéro de set est le dernier groupe de chiffres après la fraction
+  const after = clean.slice(clean.indexOf(m[0]) + m[0].length);
+  const setM  = after.match(/(\d+)\s*$/);
+  return { cardNum, setNum: setM ? parseInt(setM[1]) : null };
 }
 
-let _fingerprintsCache = null;
+let _fingerprintsCache = null; // conservé pour le reset de cache dans Admin
 let _syncPolling = null;
 
 async function loadFingerprints() {
@@ -836,31 +885,6 @@ async function loadFingerprints() {
   _fingerprintsCache = await api.getFingerprints();
   return _fingerprintsCache;
 }
-
-// Retourne le meilleur candidat ET l'écart avec le 2ème (gap de confiance).
-// Si gap < MIN_CONFIDENCE_GAP, le résultat est rejeté comme ambigu.
-function findBestMatch(queryHash, fingerprints) {
-  let best = null, second = null;
-  let bestDist = Infinity, secondDist = Infinity;
-  for (const fp of fingerprints) {
-    const dist = hammingDistance(queryHash, hexToBigInt(fp.h));
-    if (dist < bestDist) {
-      second = best; secondDist = bestDist;
-      bestDist = dist; best = fp;
-    } else if (dist < secondDist) {
-      secondDist = dist; second = fp;
-    }
-  }
-  if (!best) return null;
-  const gap = secondDist - bestDist; // plus c'est grand, plus c'est confiant
-  return { ...best, distance: bestDist, gap, secondDist };
-}
-
-// Seuil absolu : distance max acceptable (sur 64 bits).
-// Une photo caméra vs une miniature de référence diffère typiquement de 8–18 bits.
-const MATCH_THRESHOLD = 15;
-// Écart minimal entre le 1er et le 2ème candidat (si gap < cette valeur → ambigu).
-const MIN_CONFIDENCE_GAP = 3;
 
 let _scanState = { scanning: false };
 
@@ -909,8 +933,8 @@ function renderScanner() {
         </div>`;
       document.getElementById('scanVideo').srcObject = stream;
       document.getElementById('captureBtn').addEventListener('click', handleCapture);
-      // Pre-load fingerprints while user aims the camera
-      loadFingerprints().catch(() => {});
+      // Pré-charge Tesseract en arrière-plan pendant que l'utilisateur vise la carte
+      getTessWorker().catch(() => {});
     })
     .catch(() => {
       cameraArea.innerHTML = `<div class="alert alert-warning" style="margin:12px">Caméra non disponible. Utilisez la saisie manuelle ci-dessous.</div>`;
@@ -929,56 +953,48 @@ async function handleCapture() {
   document.getElementById('foundCardsArea').innerHTML = '';
   const btn = document.getElementById('captureBtn');
   btn.disabled = true;
-  btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Chargement des empreintes…`;
 
   try {
-    const fingerprints = await loadFingerprints();
-    if (!fingerprints || fingerprints.length === 0) {
-      setScanAlert('Aucune empreinte disponible. Importez d\'abord le catalogue depuis Administration.', 'error');
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Initialisation OCR…`;
+    const worker = await getTessWorker();
+
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Lecture du code carte…`;
+
+    // Capture la carte complète (pour éviter le flou sur le bas-gauche)
+    const cardCanvas = cropToCardFrame(video);
+    // Extrait et agrandit la zone code (bas-gauche) pour l'OCR
+    const zoneCanvas = extractCodeZone(cardCanvas);
+
+    // Essai 1 : image telle quelle (texte sombre sur fond clair)
+    let parsed = null;
+    const { data: { text: t1 } } = await worker.recognize(zoneCanvas);
+    parsed = parseCardCode(t1);
+
+    // Essai 2 : image inversée (texte clair sur fond sombre)
+    if (!parsed) {
+      const { data: { text: t2 } } = await worker.recognize(invertCanvas(zoneCanvas));
+      parsed = parseCardCode(t2);
+    }
+
+    if (!parsed) {
+      setScanAlert(
+        'Code illisible — assurez-vous que le bas-gauche de la carte est bien visible et éclairé, ou utilisez la saisie manuelle.',
+        'error'
+      );
       return;
     }
 
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Analyse…`;
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Chargement…`;
+    const cards = await api.lookupCard(parsed.cardNum, undefined);
 
-    // 3 frames : vote majoritaire + gap de confiance sur chaque frame
-    const votes = new Map(); // clé = fp.id → {count, bestM}
-    for (let frame = 0; frame < 3; frame++) {
-      if (frame > 0) await new Promise(r => setTimeout(r, 80));
-      const cropped   = cropToCardFrame(video);
-      const queryHash = computeAHash(cropped);
-      const m = findBestMatch(queryHash, fingerprints);
-      // On ne compte ce vote que si la frame est elle-même confiante
-      if (m && m.distance <= MATCH_THRESHOLD && m.gap >= MIN_CONFIDENCE_GAP) {
-        const key = m.id;
-        const prev = votes.get(key);
-        if (!prev || m.distance < prev.bestM.distance) {
-          votes.set(key, { count: (prev?.count ?? 0) + 1, bestM: m });
-        } else {
-          votes.set(key, { count: prev.count + 1, bestM: prev.bestM });
-        }
-      }
-    }
-    // Cherche le candidat avec le plus de votes ; en cas d'égalité, la distance gagne
-    let match = null;
-    for (const { count, bestM } of votes.values()) {
-      if (!match ||
-          count > match._count ||
-          (count === match._count && bestM.distance < match.distance)) {
-        match = { ...bestM, _count: count };
-      }
+    // Si plusieurs éditions, filtre par numéro de set lu dans le code
+    let matchedCards = cards;
+    if (parsed.setNum !== null && cards.length > 1) {
+      const filtered = cards.filter(c => c.editionSetNumber === parsed.setNum);
+      if (filtered.length > 0) matchedCards = filtered;
     }
 
-    // Rejeté si aucun vote ou si la carte n'a pas eu de majorité (≥ 2/3)
-    if (!match || match._count < 2) {
-      const hint = match ? ` (score: ${match.distance}/64, ${match._count}/3 frames)` : '';
-      setScanAlert(`Carte non reconnue${hint}. Tenez la carte bien immobile et éclairée, ou utilisez la saisie manuelle.`, 'error');
-      return;
-    }
-
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Carte reconnue — Chargement…`;
-    const cards = await api.lookupCard(match.n, undefined);
-    const matchedCards = cards.filter(c => c.editionCode === match.s);
-    await handleFoundCards(matchedCards.length > 0 ? matchedCards : cards, match.n);
+    await handleFoundCards(matchedCards, parsed.cardNum);
   } catch (e) {
     setScanAlert('Erreur : ' + e.message, 'error');
   } finally {
