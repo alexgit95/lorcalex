@@ -960,7 +960,74 @@ async function loadFingerprints() {
   return _fingerprintsCache;
 }
 
-let _scanState = { scanning: false };
+let _scanState = {
+  scanning: false,
+  continuous: false,
+  continuousRunId: 0,
+};
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function updateContinuousButton() {
+  const btn = document.getElementById('scanContinuousBtn');
+  if (!btn) return;
+  if (_scanState.continuous) {
+    btn.textContent = '⏹ Arrêter le scan continu';
+    btn.classList.remove('btn-ghost');
+    btn.classList.add('btn-accent');
+  } else {
+    btn.textContent = '▶ Démarrer le scan continu';
+    btn.classList.remove('btn-accent');
+    btn.classList.add('btn-ghost');
+  }
+}
+
+async function startContinuousScan() {
+  if (_scanState.continuous) return;
+  _scanState.continuous = true;
+  const runId = ++_scanState.continuousRunId;
+  updateContinuousButton();
+  setScanAlert('Scan continu actif : présentez une carte dans le cadre.', 'success');
+  setScanDebug([]);
+  document.getElementById('foundCardsArea').innerHTML = '';
+
+  try {
+    while (_scanState.continuous && runId === _scanState.continuousRunId) {
+      const matched = await handleCapture('camera', {
+        silentNoMatch: true,
+        keepFoundArea: true,
+      });
+      if (matched) {
+        _scanState.continuous = false;
+        updateContinuousButton();
+        return;
+      }
+      await sleep(350);
+    }
+  } finally {
+    if (runId === _scanState.continuousRunId) {
+      _scanState.continuous = false;
+      updateContinuousButton();
+    }
+  }
+}
+
+function stopContinuousScan() {
+  _scanState.continuous = false;
+  _scanState.continuousRunId += 1;
+  updateContinuousButton();
+  setScanAlert('Scan continu arrêté.', 'success');
+}
+
+function toggleContinuousScan() {
+  if (_scanState.continuous) {
+    stopContinuousScan();
+  } else {
+    startContinuousScan();
+  }
+}
 
 function renderScanner() {
   document.getElementById('app').innerHTML = `
@@ -1003,6 +1070,7 @@ function renderScanner() {
         </div>
         <div style="padding:14px 12px;display:flex;flex-direction:column;gap:8px">
           <button class="btn btn-accent btn-full" id="captureBtn">📸 Scanner depuis la caméra</button>
+          <button class="btn btn-ghost btn-full" id="scanContinuousBtn">▶ Démarrer le scan continu</button>
           <div style="display:flex;align-items:center;gap:10px;margin:4px 0">
             <hr style="flex:1;border:none;border-top:1px solid var(--border)" />
             <span style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">ou</span>
@@ -1017,6 +1085,7 @@ function renderScanner() {
         </div>`;
       document.getElementById('scanVideo').srcObject = stream;
       document.getElementById('captureBtn').addEventListener('click', () => handleCapture('camera'));
+      document.getElementById('scanContinuousBtn').addEventListener('click', toggleContinuousScan);
       document.getElementById('scanImageBtn').addEventListener('click', () => handleCapture('file'));
       document.getElementById('scanImageFile').addEventListener('change', e => {
         const f = e.target.files?.[0];
@@ -1025,6 +1094,8 @@ function renderScanner() {
         if (nameEl) nameEl.textContent = f ? `✔ ${f.name}` : 'Aucune image sélectionnée';
         if (imgBtn) imgBtn.disabled = !f;
       });
+      updateContinuousButton();
+      startContinuousScan();
     })
     .catch(err => {
       // Caméra indisponible : proposer uniquement le mode fichier
@@ -1053,12 +1124,14 @@ function renderScanner() {
   document.getElementById('manualSet').addEventListener('keydown', e => { if (e.key === 'Enter') handleManualLookup(); });
 }
 
-async function handleCapture(mode) {
-  if (_scanState.scanning) return;
+async function handleCapture(mode, options = {}) {
+  const silentNoMatch = !!options.silentNoMatch;
+  const keepFoundArea = !!options.keepFoundArea;
+  if (_scanState.scanning) return false;
   _scanState.scanning = true;
-  setScanAlert('');
+  if (!silentNoMatch) setScanAlert('');
   setScanDebug([]);
-  document.getElementById('foundCardsArea').innerHTML = '';
+  if (!keepFoundArea) document.getElementById('foundCardsArea').innerHTML = '';
 
   // Désactiver les deux boutons pendant le scan
   const camBtn = document.getElementById('captureBtn');
@@ -1129,19 +1202,23 @@ async function handleCapture(mode) {
     setScanDebug(debugLines);
 
     if (!parsed) {
-      setScanAlert(
-        'Code illisible. Vérifiez : éclairage suffisant, carte bien centrée dans le cadre, code "N/TOTAL • FR • N" visible net en bas-gauche. Consultez le détail OCR ci-dessous.',
-        'error'
-      );
-      return;
+      if (!silentNoMatch) {
+        setScanAlert(
+          'Code illisible. Vérifiez : éclairage suffisant, carte bien centrée dans le cadre, code "N/TOTAL • FR • N" visible net en bas-gauche. Consultez le détail OCR ci-dessous.',
+          'error'
+        );
+      }
+      return false;
     }
 
     // Étape 4 — Recherche de la carte en base
     if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Recherche carte #${parsed.cardNum}…`;
     const cards = await api.lookupCard(parsed.cardNum, undefined);
     if (cards.length === 0) {
-      setScanAlert(`Aucune carte #${parsed.cardNum} en base. Importez d'abord le catalogue via Administration.`, 'error');
-      return;
+      if (!silentNoMatch) {
+        setScanAlert(`Aucune carte #${parsed.cardNum} en base. Importez d'abord le catalogue via Administration.`, 'error');
+      }
+      return false;
     }
     let matchedCards = cards;
     if (parsed.setNum !== null && cards.length > 1) {
@@ -1149,10 +1226,12 @@ async function handleCapture(mode) {
       if (filtered.length > 0) matchedCards = filtered;
     }
     await handleFoundCards(matchedCards, parsed.cardNum);
+    return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setScanAlert(`Erreur : ${msg}`, 'error');
+    if (!silentNoMatch) setScanAlert(`Erreur : ${msg}`, 'error');
     console.error('[Scanner] handleCapture :', e);
+    return false;
   } finally {
     _scanState.scanning = false;
     if (camBtn) { camBtn.disabled = false; camBtn.textContent = '📸 Scanner depuis la caméra'; }
