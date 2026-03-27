@@ -796,16 +796,32 @@ function cropToCardFrame(video) {
 // Format Lorcana FR : "N/TOTAL · FR · SET"  ex : "1/204 · FR · 4"
 
 let _tessWorker = null;
+let _tessWorkerLoading = null;
 
 // Initialise le worker Tesseract (chargé une seule fois, conservé en mémoire).
 async function getTessWorker() {
   if (_tessWorker) return _tessWorker;
-  _tessWorker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
-  await _tessWorker.setParameters({
-    tessedit_char_whitelist: '0123456789/·•. FR',
-    tessedit_pageseg_mode: '7', // single text line
-  });
-  return _tessWorker;
+  // Guard : évite de créer deux workers en parallèle
+  if (_tessWorkerLoading) return _tessWorkerLoading;
+  _tessWorkerLoading = (async () => {
+    if (typeof Tesseract === 'undefined') {
+      throw new Error('Tesseract.js non chargé — vérifiez votre connexion internet.');
+    }
+    const w = await Tesseract.createWorker('eng', 1, {
+      logger: () => {},
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/worker.min.js',
+      langPath:   'https://tessdata.projectnaptha.com/4.0.0/',
+      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.3/tesseract-core-lstm.wasm.js',
+    });
+    await w.setParameters({
+      tessedit_char_whitelist: '0123456789/.',
+      tessedit_pageseg_mode: '7',
+    });
+    _tessWorker = w;
+    _tessWorkerLoading = null;
+    return w;
+  })();
+  return _tessWorkerLoading;
 }
 
 // Extrait la zone bas-gauche de la carte et l'agrandit pour l'OCR.
@@ -996,7 +1012,8 @@ async function handleCapture() {
 
     await handleFoundCards(matchedCards, parsed.cardNum);
   } catch (e) {
-    setScanAlert('Erreur : ' + e.message, 'error');
+    const msg = e instanceof Error ? e.message : String(e);
+    setScanAlert('Erreur : ' + (msg || 'Échec OCR — réessayez avec plus de lumière.'), 'error');
   } finally {
     _scanState.scanning = false;
     const b = document.getElementById('captureBtn');
