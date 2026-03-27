@@ -857,9 +857,10 @@ function findBestMatch(queryHash, fingerprints) {
 }
 
 // Seuil absolu : distance max acceptable (sur 64 bits).
-const MATCH_THRESHOLD = 12;
+// Une photo caméra vs une miniature de référence diffère typiquement de 8–18 bits.
+const MATCH_THRESHOLD = 15;
 // Écart minimal entre le 1er et le 2ème candidat (si gap < cette valeur → ambigu).
-const MIN_CONFIDENCE_GAP = 5;
+const MIN_CONFIDENCE_GAP = 3;
 
 let _scanState = { scanning: false };
 
