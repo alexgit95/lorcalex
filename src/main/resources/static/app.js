@@ -747,7 +747,8 @@ function renderStatistics() {
   });
 }
 
-// ─── SCANNER ─ Fingerprint-based full-card recognition ────────────────────────
+// ─── SCANNER ─ Lecture OCR du code Lorcana en bas-gauche de la carte ──────────
+// Format : "N/TOTAL • LANG • SET"   exemple : "1/204 • FR • 4"
 
 let _cameraStream = null;
 
@@ -758,103 +759,98 @@ function stopCamera() {
   }
 }
 
-// Recadre le flux vidéo sur la zone du cadre carte affiché à l'écran.
-// Tient compte de object-fit:cover pour convertir les coordonnées écran → pixels natifs.
+// ── Capture vidéo recadrée sur le cadre carte ─────────────────────────────────
+// Convertit les coordonnées écran → pixels natifs (object-fit:cover).
 function cropToCardFrame(video) {
+  const c = document.createElement('canvas');
   const frame = document.querySelector('.scanner-card-frame');
   if (!frame || !video.videoWidth) {
-    // Fallback : frame entière
-    const c = document.createElement('canvas');
-    c.width = video.videoWidth || 640; c.height = video.videoHeight || 480;
+    c.width = video.videoWidth || 640;
+    c.height = video.videoHeight || 480;
     c.getContext('2d').drawImage(video, 0, 0);
     return c;
   }
   const vR = video.getBoundingClientRect();
   const fR = frame.getBoundingClientRect();
-  const dW = vR.width, dH = vR.height;
   const nW = video.videoWidth, nH = video.videoHeight;
-  // object-fit:cover — le facteur d'échelle garde les deux dimensions >= container
-  const s = Math.max(dW / nW, dH / nH);
-  // Décalage de centrage (en px écran) côté clippé
+  const dW = vR.width,        dH = vR.height;
+  const s  = Math.max(dW / nW, dH / nH);
   const ox = (nW * s - dW) / 2;
   const oy = (nH * s - dH) / 2;
-  // Position du cadre par rapport à la vidéo
-  const fLeft = fR.left - vR.left;
-  const fTop  = fR.top  - vR.top;
-  // Conversion vers coordonnées natives
-  const cropX = Math.max(0, (fLeft + ox) / s);
-  const cropY = Math.max(0, (fTop  + oy) / s);
+  const cropX = Math.max(0, ((fR.left - vR.left) + ox) / s);
+  const cropY = Math.max(0, ((fR.top  - vR.top)  + oy) / s);
   const cropW = Math.min(nW - cropX, fR.width  / s);
   const cropH = Math.min(nH - cropY, fR.height / s);
-  const c = document.createElement('canvas');
-  c.width = Math.round(cropW);  c.height = Math.round(cropH);
+  c.width  = Math.round(cropW);
+  c.height = Math.round(cropH);
   c.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, c.width, c.height);
   return c;
 }
 
-// ─── Scanner OCR — lecture du code en bas à gauche de la carte ───────────────
-// Format Lorcana FR : "N/TOTAL · FR · SET"  ex : "1/204 · FR · 4"
-
-let _tessWorker = null;
-let _tessWorkerLoading = null;
-
-// Initialise le worker Tesseract (chargé une seule fois, conservé en mémoire).
-async function getTessWorker() {
-  if (_tessWorker) return _tessWorker;
-  // Guard : évite de créer deux workers en parallèle
-  if (_tessWorkerLoading) return _tessWorkerLoading;
-  _tessWorkerLoading = (async () => {
-    if (typeof Tesseract === 'undefined') {
-      throw new Error('Tesseract.js non chargé — vérifiez votre connexion internet.');
-    }
-    // Pas de chemins personnalisés — Tesseract v4 gère les siennes depuis le CDN déjà chargé
-    const w = await Tesseract.createWorker('eng');
-    await w.setParameters({
-      tessedit_char_whitelist: '0123456789/.',
-      tessedit_pageseg_mode: '7',
-    });
-    _tessWorker = w;
-    _tessWorkerLoading = null;
-    return w;
-  })();
-  return _tessWorkerLoading;
-}
-
-// Extrait la zone bas-gauche de la carte et l'agrandit pour l'OCR.
-// Le scan se fait sur la carte entière ; on recadre ici en post-traitement.
-function extractCodeZone(cardCanvas, scale = 6) {
+// ── Extraction de la zone code (bas-gauche) ───────────────────────────────────
+// Prend les 12 % inférieurs × 55 % gauches de la carte, upscale ×8 pour l'OCR.
+function extractCodeZone(cardCanvas) {
   const sw = cardCanvas.width, sh = cardCanvas.height;
-  // Zone : bas 15 % de la hauteur, gauche 50 % de la largeur
-  const zW = Math.round(sw * 0.50), zH = Math.round(sh * 0.15);
+  const zW = Math.round(sw * 0.55);
+  const zH = Math.round(sh * 0.12);
   const zY = sh - zH;
+  const SCALE = 8;
   const out = document.createElement('canvas');
-  out.width  = zW * scale;
-  out.height = zH * scale;
+  out.width  = zW * SCALE;
+  out.height = zH * SCALE;
   const ctx = out.getContext('2d');
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(cardCanvas, 0, zY, zW, zH, 0, 0, out.width, out.height);
-  // Grayscale + étirement de contraste pour améliorer la lisibilité
-  const img = ctx.getImageData(0, 0, out.width, out.height);
-  const d = img.data;
-  let minG = 255, maxG = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const g = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
-    if (g < minG) minG = g;
-    if (g > maxG) maxG = g;
-  }
-  const range = Math.max(1, maxG - minG);
-  for (let i = 0; i < d.length; i += 4) {
-    const g = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
-    const v = Math.round(((g - minG) / range) * 255);
-    d[i] = d[i + 1] = d[i + 2] = v;
-    d[i + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
   return out;
 }
 
-// Retourne un canvas inversé (noir ↔ blanc) pour gérer texte clair sur fond sombre.
+// ── Prétraitements image ──────────────────────────────────────────────────────
+
+// Conversion niveaux de gris in-place.
+function toGrayscale(canvas) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = (d[i] * 299 + d[i+1] * 587 + d[i+2] * 114) / 1000 | 0;
+    d[i] = d[i+1] = d[i+2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+// Binarisation par seuil d'Otsu (in-place, image déjà en niveaux de gris).
+function otsuThreshold(canvas) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const N = canvas.width * canvas.height;
+  const hist = new Int32Array(256);
+  for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (!wB) continue;
+    const wF = N - wB;
+    if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) ** 2;
+    if (v > maxVar) { maxVar = v; threshold = t; }
+  }
+  for (let i = 0; i < d.length; i += 4) {
+    const v = d[i] > threshold ? 255 : 0;
+    d[i] = d[i+1] = d[i+2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+// Retourne un nouveau canvas inversé (noir ↔ blanc).
 function invertCanvas(src) {
   const out = document.createElement('canvas');
   out.width = src.width; out.height = src.height;
@@ -863,30 +859,79 @@ function invertCanvas(src) {
   const img = ctx.getImageData(0, 0, out.width, out.height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
-    d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2];
+    d[i] = 255 - d[i]; d[i+1] = 255 - d[i+1]; d[i+2] = 255 - d[i+2];
   }
   ctx.putImageData(img, 0, 0);
   return out;
 }
 
-// Parse le texte OCR et extrait le numéro de carte + numéro de set.
-function parseCardCode(text) {
-  // Corrections d'OCR classiques
-  const clean = text
-    .replace(/[oO]/g, '0')
+// Copie un canvas.
+function cloneCanvas(src) {
+  const out = document.createElement('canvas');
+  out.width = src.width; out.height = src.height;
+  out.getContext('2d').drawImage(src, 0, 0);
+  return out;
+}
+
+// ── Tesseract worker (singleton) ──────────────────────────────────────────────
+let _tessWorker = null;
+let _tessWorkerLoading = null;
+
+// PSM 7 = traiter comme une unique ligne de texte.
+async function getTessWorker() {
+  if (_tessWorker) return _tessWorker;
+  if (_tessWorkerLoading) return _tessWorkerLoading;
+  _tessWorkerLoading = (async () => {
+    if (typeof Tesseract === 'undefined') {
+      throw new Error('Tesseract.js non chargé. Vérifiez votre connexion internet et rechargez la page.');
+    }
+    const w = await Tesseract.createWorker('eng');
+    try {
+      await w.setParameters({
+        tessedit_pageseg_mode: '7',
+        tessedit_char_whitelist: '0123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZ \u2022\u00b7.-',
+        tessjs_create_hocr: '0',
+        tessjs_create_tsv:  '0',
+      });
+    } catch (paramErr) {
+      // setParameters peut échouer sur certaines versions WASM — on continue sans whitelist.
+      console.warn('[Scanner] setParameters ignoré :', paramErr.message);
+    }
+    _tessWorker = w;
+    _tessWorkerLoading = null;
+    return w;
+  })();
+  return _tessWorkerLoading;
+}
+
+// ── Parsing du code Lorcana ───────────────────────────────────────────────────
+// Format : "N/TOTAL • LANG • SET"  ex : "1/204 • FR • 4"
+function parseCardCode(rawText) {
+  const text = rawText
+    .toUpperCase()
+    .replace(/\n/g,     ' ')
+    .replace(/[oO@]/g,  '0')
     .replace(/[lI|!]/g, '1')
-    .replace(/[–—―]/g, '/')
-    .replace(/\s+/g, ' ');
-  const m = clean.match(/(\d{1,3})\s*[\/\\]\s*(\d{1,3})/);
+    .replace(/[–—―‒]/g, '/')
+    .replace(/\s+/g,    ' ')
+    .trim();
+  const m = text.match(/(\d{1,3})\s*[\/\\]\s*(\d{2,3})/);
   if (!m) return null;
-  const cardNum = parseInt(m[1]);
-  const total   = parseInt(m[2]);
-  if (isNaN(cardNum) || cardNum < 1 || cardNum > 500) return null;
-  if (!isNaN(total) && total > 0 && total > 500) return null;
-  // Le numéro de set est le dernier groupe de chiffres après la fraction
-  const after = clean.slice(clean.indexOf(m[0]) + m[0].length);
-  const setM  = after.match(/(\d+)\s*$/);
-  return { cardNum, setNum: setM ? parseInt(setM[1]) : null };
+  const cardNum = parseInt(m[1], 10);
+  const total   = parseInt(m[2], 10);
+  if (cardNum < 1 || cardNum > 999) return null;
+  if (total   < 2  || total   > 400) return null;
+  if (cardNum > total)               return null;
+  const after  = text.slice(text.indexOf(m[0]) + m[0].length);
+  const langM  = after.match(/\b([A-Z]{2})\b/);
+  const setM   = after.match(/(\d+)\s*$/);
+  return {
+    cardNum,
+    total,
+    lang:   langM ? langM[1] : null,
+    setNum: setM  ? parseInt(setM[1], 10) : null,
+    raw:    rawText.trim(),
+  };
 }
 
 let _fingerprintsCache = null; // conservé pour le reset de cache dans Admin
@@ -907,11 +952,13 @@ function renderScanner() {
         <div class="page-header"><h1>📷 Scanner</h1></div>
         <div id="scanCameraArea"></div>
         <div id="scanAlerts"></div>
+        <div id="scanDebug"></div>
         <div id="foundCardsArea"></div>
         <div style="padding:12px;border-top:1px solid var(--border);margin-top:8px">
           <p style="font-size:.75rem;color:var(--text-muted);margin:0 0 8px">Saisie manuelle</p>
           <div style="display:flex;gap:8px">
-            <input class="search-input" id="manualNum" type="number" placeholder="Numéro de carte…" min="1" style="border-radius:8px" />
+            <input class="search-input" id="manualNum" type="number" placeholder="N° carte" min="1" style="border-radius:8px" />
+            <input class="search-input" id="manualSet" type="number" placeholder="Set" min="1" style="border-radius:8px;width:68px" />
             <button class="btn btn-ghost" id="manualLookupBtn" style="flex-shrink:0">Chercher</button>
           </div>
         </div>
@@ -921,7 +968,7 @@ function renderScanner() {
 
   const cameraArea = document.getElementById('scanCameraArea');
   navigator.mediaDevices?.getUserMedia({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
   })
     .then(stream => {
       _cameraStream = stream;
@@ -940,76 +987,111 @@ function renderScanner() {
         <div style="padding:14px 12px">
           <button class="btn btn-accent btn-full" id="captureBtn">📷 Identifier la carte</button>
           <p style="text-align:center;font-size:.75rem;color:var(--text-muted);margin-top:8px">
-            Centrez la carte entière dans le cadre, puis appuyez sur le bouton.
+            Cadrez la <strong>carte entière</strong> — le code bas-gauche (ex&nbsp;: 1/204&nbsp;•&nbsp;FR&nbsp;•&nbsp;4) doit être net.
           </p>
         </div>`;
       document.getElementById('scanVideo').srcObject = stream;
       document.getElementById('captureBtn').addEventListener('click', handleCapture);
-      // Pré-charge Tesseract en arrière-plan pendant que l'utilisateur vise la carte
-      getTessWorker().catch(() => {});
+      getTessWorker().catch(e => console.warn('[Scanner] pré-chargement Tesseract :', e.message));
     })
-    .catch(() => {
-      cameraArea.innerHTML = `<div class="alert alert-warning" style="margin:12px">Caméra non disponible. Utilisez la saisie manuelle ci-dessous.</div>`;
+    .catch(err => {
+      cameraArea.innerHTML = `<div class="alert alert-warning" style="margin:12px">Caméra indisponible (${esc(err.message)}) — utilisez la saisie manuelle ci-dessous.</div>`;
     });
 
   document.getElementById('manualLookupBtn').addEventListener('click', handleManualLookup);
   document.getElementById('manualNum').addEventListener('keydown', e => { if (e.key === 'Enter') handleManualLookup(); });
+  document.getElementById('manualSet').addEventListener('keydown', e => { if (e.key === 'Enter') handleManualLookup(); });
 }
 
 async function handleCapture() {
   if (_scanState.scanning) return;
   const video = document.getElementById('scanVideo');
-  if (!video) return;
+  if (!video || !video.videoWidth) {
+    setScanAlert('Caméra pas encore prête, veuillez patienter.', 'warning');
+    return;
+  }
   _scanState.scanning = true;
   setScanAlert('');
+  setScanDebug([]);
   document.getElementById('foundCardsArea').innerHTML = '';
   const btn = document.getElementById('captureBtn');
   btn.disabled = true;
 
   try {
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Initialisation OCR…`;
+    // Étape 1 — Initialisation Tesseract
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Chargement OCR…`;
     const worker = await getTessWorker();
 
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Lecture du code carte…`;
-
-    // Capture la carte complète (pour éviter le flou sur le bas-gauche)
+    // Étape 2 — Capture + extraction de la zone code bas-gauche
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Capture…`;
     const cardCanvas = cropToCardFrame(video);
-    // Extrait et agrandit la zone code (bas-gauche) pour l'OCR
-    const zoneCanvas = extractCodeZone(cardCanvas);
+    const zoneRaw    = extractCodeZone(cardCanvas);
 
-    // Essai 1 : image telle quelle (texte sombre sur fond clair)
+    // Étape 3 — 4 variantes de prétraitement pour maximiser la détection
+    // A : image naturelle (upscalée)
+    // B : inversée (texte clair sur fond sombre)
+    // C : niveaux de gris + binarisation Otsu
+    // D : Otsu inversé
+    const canvC = otsuThreshold(toGrayscale(cloneCanvas(zoneRaw)));
+    const variants = [
+      { label: 'naturel',      canvas: zoneRaw },
+      { label: 'inversé',      canvas: invertCanvas(zoneRaw) },
+      { label: 'Otsu',         canvas: canvC },
+      { label: 'Otsu+inversé', canvas: invertCanvas(cloneCanvas(canvC)) },
+    ];
+
+    // Étape 4 — OCR sur chaque variante
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Lecture OCR…`;
+    const debugLines = [
+      `Zone : ${zoneRaw.width}×${zoneRaw.height} px  (carte ${cardCanvas.width}×${cardCanvas.height})`,
+    ];
     let parsed = null;
-    const { data: { text: t1 } } = await worker.recognize(zoneCanvas);
-    parsed = parseCardCode(t1);
-
-    // Essai 2 : image inversée (texte clair sur fond sombre)
-    if (!parsed) {
-      const { data: { text: t2 } } = await worker.recognize(invertCanvas(zoneCanvas));
-      parsed = parseCardCode(t2);
+    for (const { label, canvas } of variants) {
+      let result;
+      try {
+        result = await worker.recognize(canvas);
+      } catch (ocrErr) {
+        debugLines.push(`[${label}] ❌ Erreur Tesseract : ${ocrErr.message}`);
+        continue;
+      }
+      const raw  = result.data.text.trim().replace(/\n/g, ' ');
+      const conf = Math.round(result.data.confidence);
+      const p    = parseCardCode(raw);
+      const info = p
+        ? `✔ #${p.cardNum}/${p.total}  lang=${p.lang ?? '?'}  set=${p.setNum ?? '?'}`
+        : '✘ non reconnu';
+      debugLines.push(`[${label}] conf=${conf}%   "${raw}"   →   ${info}`);
+      if (!parsed && p) parsed = p;
     }
+
+    // Panneau debug toujours affiché pour faciliter le diagnostic
+    setScanDebug(debugLines);
 
     if (!parsed) {
       setScanAlert(
-        'Code illisible — assurez-vous que le bas-gauche de la carte est bien visible et éclairé, ou utilisez la saisie manuelle.',
+        'Code illisible. Vérifiez : éclairage suffisant, carte bien centrée dans le cadre, code "N/TOTAL • FR • N" visible net en bas-gauche. Consultez le détail OCR ci-dessous.',
         'error'
       );
       return;
     }
 
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Chargement…`;
+    // Étape 5 — Recherche de la carte en base
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Recherche carte #${parsed.cardNum}…`;
     const cards = await api.lookupCard(parsed.cardNum, undefined);
-
-    // Si plusieurs éditions, filtre par numéro de set lu dans le code
+    if (cards.length === 0) {
+      setScanAlert(`Aucune carte #${parsed.cardNum} en base. Importez d'abord le catalogue via Administration.`, 'error');
+      return;
+    }
     let matchedCards = cards;
     if (parsed.setNum !== null && cards.length > 1) {
       const filtered = cards.filter(c => c.editionSetNumber === parsed.setNum);
       if (filtered.length > 0) matchedCards = filtered;
     }
-
     await handleFoundCards(matchedCards, parsed.cardNum);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setScanAlert('Erreur : ' + (msg || 'Échec OCR — réessayez avec plus de lumière.'), 'error');
+    setScanAlert(`Erreur : ${msg}`, 'error');
+    console.error('[Scanner] handleCapture :', e);
   } finally {
     _scanState.scanning = false;
     const b = document.getElementById('captureBtn');
@@ -1018,16 +1100,24 @@ async function handleCapture() {
 }
 
 async function handleManualLookup() {
-  const input = document.getElementById('manualNum');
-  const num = parseInt(input?.value);
+  const numInput = document.getElementById('manualNum');
+  const setInput = document.getElementById('manualSet');
+  const num    = parseInt(numInput?.value, 10);
+  const setNum = parseInt(setInput?.value, 10) || null;
   if (!num || num < 1) { setScanAlert('Numéro de carte invalide.', 'error'); return; }
   setScanAlert('');
+  setScanDebug([]);
   document.getElementById('foundCardsArea').innerHTML = '';
   try {
     const cards = await api.lookupCard(num, undefined);
-    await handleFoundCards(cards, num);
+    let matchedCards = cards;
+    if (setNum && cards.length > 1) {
+      const filtered = cards.filter(c => c.editionSetNumber === setNum);
+      if (filtered.length > 0) matchedCards = filtered;
+    }
+    await handleFoundCards(matchedCards, num);
   } catch (e) {
-    setScanAlert('Erreur: ' + e.message, 'error');
+    setScanAlert(`Erreur : ${e.message}`, 'error');
   }
 }
 
@@ -1118,6 +1208,18 @@ function setScanAlert(msg, type = 'success') {
   const el = document.getElementById('scanAlerts');
   if (!el) return;
   el.innerHTML = msg ? `<div class="alert alert-${type}" style="margin:0 12px 10px">${esc(msg)}</div>` : '';
+}
+
+// Affiche les lignes de debug OCR dans un panneau dépliable.
+function setScanDebug(lines) {
+  const el = document.getElementById('scanDebug');
+  if (!el) return;
+  if (!lines || lines.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <details style="margin:0 12px 8px;font-size:.72rem;font-family:monospace;background:var(--bg-card2);border-radius:8px;padding:8px 10px">
+      <summary style="cursor:pointer;color:var(--text-muted);user-select:none">🔍 Détail OCR — cliquer pour afficher</summary>
+      ${lines.map(r => `<div style="margin-top:4px;color:var(--text-muted);word-break:break-all">${esc(r)}</div>`).join('')}
+    </details>`;
 }
 
 function playBeep(freq = 880, dur = 200) {
