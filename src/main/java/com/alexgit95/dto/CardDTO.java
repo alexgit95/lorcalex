@@ -20,6 +20,7 @@ public class CardDTO {
     private Long editionId;
     private String editionName;
     private String editionCode;
+    private Integer editionSetNumber;
     // Collection info (null if not fetched with collection context)
     private Boolean owned;
     private Integer quantity;

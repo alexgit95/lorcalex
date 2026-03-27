@@ -30,6 +30,8 @@ public class Edition {
 
     private String logoUrl;
 
+    private Integer setNumber;
+
     @OneToMany(mappedBy = "edition", fetch = FetchType.LAZY)
     private List<Card> cards = new ArrayList<>();
 

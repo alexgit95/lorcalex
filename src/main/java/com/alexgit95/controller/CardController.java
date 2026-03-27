@@ -7,6 +7,7 @@ import com.alexgit95.service.CardService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -25,10 +26,12 @@ public class CardController {
     @GetMapping("/editions")
     public ResponseEntity<List<Map<String, Object>>> getEditions() {
         List<Map<String, Object>> editions = editionRepository.findAll().stream()
+                .sorted(Comparator.comparingInt(e -> (e.getSetNumber() != null ? e.getSetNumber() : Integer.MAX_VALUE)))
                 .map(e -> Map.<String, Object>of(
                         "id", e.getId(),
                         "name", e.getName(),
                         "code", e.getCode() != null ? e.getCode() : "",
+                        "setNumber", e.getSetNumber() != null ? e.getSetNumber() : 0,
                         "totalCards", e.getTotalCards() != null ? e.getTotalCards() : 0,
                         "releaseDate", e.getReleaseDate() != null ? e.getReleaseDate() : "",
                         "logoUrl", e.getLogoUrl() != null ? e.getLogoUrl() : ""
@@ -74,4 +77,16 @@ public class CardController {
                 .toList();
         return ResponseEntity.ok(results);
     }
+
+    /**
+     * Returns lightweight fingerprint data for all cards that have a computed hash.
+     * Used by the client-side scanner for full-card recognition.
+     * Response: [{id, n (cardNumber), s (setCode/editionCode), h (hex hash)}]
+     */
+    @GetMapping("/cards/fingerprints")
+    public ResponseEntity<List<Map<String, Object>>> getFingerprints() {
+        List<Map<String, Object>> fingerprints = cardService.getAllFingerprints();
+        return ResponseEntity.ok(fingerprints);
+    }
 }
+

@@ -9,6 +9,7 @@ import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,16 +50,12 @@ public class CardService {
                 .collect(Collectors.toMap(uc -> uc.getCard().getId(), uc -> uc));
 
         return cards.stream()
-                .sorted((a, b) -> {
-                    if (a.getEdition() != null && b.getEdition() != null) {
-                        int edCmp = a.getEdition().getId().compareTo(b.getEdition().getId());
-                        if (edCmp != 0) return edCmp;
-                    }
-                    if (a.getCardNumber() != null && b.getCardNumber() != null) {
-                        return a.getCardNumber().compareTo(b.getCardNumber());
-                    }
-                    return 0;
-                })
+                .sorted(Comparator
+                        .comparingInt((Card c) -> {
+                            Edition e = c.getEdition();
+                            return (e != null && e.getSetNumber() != null) ? e.getSetNumber() : Integer.MAX_VALUE;
+                        })
+                        .thenComparingInt(c -> c.getCardNumber() != null ? c.getCardNumber() : Integer.MAX_VALUE))
                 .map(card -> toDTO(card, ownedMap.get(card.getId())))
                 .collect(Collectors.toList());
     }
@@ -66,6 +63,12 @@ public class CardService {
     public List<CardDTO> searchCards(String query) {
         return cardRepository.searchByName(query)
                 .stream()
+                .sorted(Comparator
+                        .comparingInt((Card c) -> {
+                            Edition e = c.getEdition();
+                            return (e != null && e.getSetNumber() != null) ? e.getSetNumber() : Integer.MAX_VALUE;
+                        })
+                        .thenComparingInt(c -> c.getCardNumber() != null ? c.getCardNumber() : Integer.MAX_VALUE))
                 .map(card -> {
                     Optional<UserCollection> uc = collectionRepository.findByCardId(card.getId());
                     return toDTO(card, uc.orElse(null));
@@ -79,6 +82,24 @@ public class CardService {
                     Optional<UserCollection> uc = collectionRepository.findByCardId(id);
                     return toDTO(card, uc.orElse(null));
                 });
+    }
+
+    /**
+     * Returns lightweight fingerprint data for all cards with a computed hash.
+     */
+    public List<Map<String, Object>> getAllFingerprints() {
+        return cardRepository.findAll().stream()
+                .filter(c -> c.getImageHash() != null)
+                .map(c -> Map.<String, Object>of(
+                        "id", c.getId(),
+                        "n", c.getCardNumber() != null ? c.getCardNumber() : 0,
+                        "s", c.getEdition() != null && c.getEdition().getCode() != null
+                                ? c.getEdition().getCode() : "",
+                        "sn", c.getEdition() != null && c.getEdition().getSetNumber() != null
+                                ? c.getEdition().getSetNumber() : 0,
+                        "h", Long.toHexString(c.getImageHash())
+                ))
+                .toList();
     }
 
     public CardDTO toDTO(Card card, UserCollection uc) {
@@ -100,9 +121,11 @@ public class CardService {
             dto.setEditionId(card.getEdition().getId());
             dto.setEditionName(card.getEdition().getName());
             dto.setEditionCode(card.getEdition().getCode());
+            dto.setEditionSetNumber(card.getEdition().getSetNumber());
         }
         dto.setOwned(uc != null);
         dto.setQuantity(uc != null ? uc.getQuantity() : 0);
         return dto;
     }
 }
+

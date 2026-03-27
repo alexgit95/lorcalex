@@ -24,4 +24,10 @@ public interface UserCollectionRepository extends JpaRepository<UserCollection, 
 
     @Query("SELECT COUNT(uc) FROM UserCollection uc JOIN uc.card c WHERE c.edition.id = :editionId AND c.rarity = :rarity")
     long countByEditionIdAndRarity(@Param("editionId") Long editionId, @Param("rarity") String rarity);
+
+    @Query("SELECT COUNT(uc) FROM UserCollection uc WHERE uc.card.rarity IN :rarities")
+    long countByCardRarityIn(@Param("rarities") List<String> rarities);
+
+    @Query("SELECT COUNT(uc) FROM UserCollection uc WHERE uc.card.edition.id = :editionId AND uc.card.rarity IN :rarities")
+    long countByEditionIdAndRarityIn(@Param("editionId") Long editionId, @Param("rarities") List<String> rarities);
 }

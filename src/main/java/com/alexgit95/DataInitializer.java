@@ -52,10 +52,8 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void initSettings() {
-        createSettingIfAbsent("external_api_enabled", "false",
-                "Enable/disable calls to external Lorcana API");
-        createSettingIfAbsent("external_api_url", "https://api.lorcana-api.com/cards/all",
-                "URL of the external Lorcana card API");
+        createSettingIfAbsent("lorcajson_url", "https://lorcanajson.org/files/current/fr/allCards.json",
+                "URL du fichier LorcaJson (allCards.json) pour l'import des cartes");
     }
 
     private void createSettingIfAbsent(String key, String defaultValue, String description) {

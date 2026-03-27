@@ -27,4 +27,10 @@ public interface CardRepository extends JpaRepository<Card, Long> {
     long countByEdition(Edition edition);
 
     long countByEditionId(Long editionId);
+
+    long countByRarityIn(List<String> rarities);
+
+    long countByEditionAndRarityIn(Edition edition, List<String> rarities);
+
+    List<Card> findByImageHashIsNull();
 }

@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 public class StatisticsService {
 
     private static final List<String> RARITIES = Arrays.asList(
-            "Common", "Uncommon", "Rare", "Super Rare", "Legendary", "Enchanted"
+            "Commune", "Inhabituelle", "Rare", "Très Rare", "Légendaire"
     );
 
     private final CardRepository cardRepository;
@@ -34,8 +34,8 @@ public class StatisticsService {
     }
 
     public StatisticsDTO getStatistics() {
-        long totalCards = cardRepository.count();
-        long ownedCards = collectionRepository.count();
+        long totalCards = cardRepository.countByRarityIn(RARITIES);
+        long ownedCards = collectionRepository.countByCardRarityIn(RARITIES);
         long missingCards = totalCards - ownedCards;
 
         List<Edition> editions = editionRepository.findAll();
@@ -53,8 +53,8 @@ public class StatisticsService {
     }
 
     private EditionStatDTO buildEditionStat(Edition edition) {
-        long total = cardRepository.countByEdition(edition);
-        long owned = collectionRepository.countByEditionId(edition.getId());
+        long total = cardRepository.countByEditionAndRarityIn(edition, RARITIES);
+        long owned = collectionRepository.countByEditionIdAndRarityIn(edition.getId(), RARITIES);
         long missing = total - owned;
 
         List<RarityStatDTO> byRarity = buildRarityStats(edition, cardRepository.findByEditionOrderByCardNumberAsc(edition));
@@ -74,7 +74,9 @@ public class StatisticsService {
     private List<RarityStatDTO> buildRarityStats(Edition edition, List<Card> cards) {
         return RARITIES.stream()
                 .map(rarity -> {
-                    long total = cards.stream().filter(c -> rarity.equals(c.getRarity())).count();
+                    long total = cards.stream()
+                            .filter(c -> rarity.equals(c.getRarity()))
+                            .count();
                     if (total == 0) return null;
                     long owned = collectionRepository.countByEditionIdAndRarity(edition.getId(), rarity);
                     return new RarityStatDTO(rarity, total, owned, total - owned);

@@ -40,11 +40,16 @@ public class Card {
     @Column(columnDefinition = "TEXT")
     private String imageUrl;
 
+    @Column(columnDefinition = "TEXT")
+    private String thumbnailUrl;
+
     private String artist;
 
     private Boolean inkable;
 
     private String externalId;
+
+    private Long imageHash;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "edition_id")

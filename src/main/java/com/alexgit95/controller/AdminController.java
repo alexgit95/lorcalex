@@ -8,10 +8,12 @@ import com.alexgit95.repository.AppSettingsRepository;
 import com.alexgit95.repository.CardRepository;
 import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
-import com.alexgit95.service.ExternalApiService;
+import com.alexgit95.service.LorcaJsonService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,18 +26,18 @@ import java.util.stream.Collectors;
 public class AdminController {
 
     private final AppSettingsRepository settingsRepository;
-    private final ExternalApiService externalApiService;
+    private final LorcaJsonService lorcaJsonService;
     private final UserCollectionRepository userCollectionRepository;
     private final CardRepository cardRepository;
     private final EditionRepository editionRepository;
 
     public AdminController(AppSettingsRepository settingsRepository,
-                           ExternalApiService externalApiService,
+                           LorcaJsonService lorcaJsonService,
                            UserCollectionRepository userCollectionRepository,
                            CardRepository cardRepository,
                            EditionRepository editionRepository) {
         this.settingsRepository = settingsRepository;
-        this.externalApiService = externalApiService;
+        this.lorcaJsonService = lorcaJsonService;
         this.userCollectionRepository = userCollectionRepository;
         this.cardRepository = cardRepository;
         this.editionRepository = editionRepository;
@@ -56,34 +58,61 @@ public class AdminController {
         return ResponseEntity.ok(settingsRepository.save(setting));
     }
 
-    @PostMapping("/sync")
-    public ResponseEntity<Map<String, Object>> syncCards() {
-        try {
-            int count = externalApiService.syncCards();
+    @GetMapping("/progress")
+    public ResponseEntity<Map<String, Object>> getProgress() {
+        return ResponseEntity.ok(lorcaJsonService.getProgress().toMap());
+    }
+
+    /** Asynchronously import cards from a LorcaJson URL. */
+    @PostMapping("/sync/url")
+    public ResponseEntity<Map<String, Object>> syncFromUrl(@RequestBody(required = false) Map<String, String> body) {
+        if (lorcaJsonService.isRunning()) {
             return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "syncedCards", count,
-                    "message", "Sync completed: " + count + " cards synced"
-            ));
-        } catch (IllegalStateException e) {
+                    "started", false, "running", true,
+                    "message", "Une opération est déjà en cours."));
+        }
+        String url = (body != null) ? body.get("url") : null;
+        lorcaJsonService.startSyncFromUrl(url);
+        return ResponseEntity.ok(Map.of("started", true, "message", "Synchronisation démarrée."));
+    }
+
+    /** Asynchronously import cards from an uploaded allCards.json file. */
+    @PostMapping("/sync/file")
+    public ResponseEntity<Map<String, Object>> syncFromFile(@RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of(
-                    "success", false,
-                    "message", e.getMessage()
-            ));
+                    "started", false, "message", "Aucun fichier fourni."));
+        }
+        if (lorcaJsonService.isRunning()) {
+            return ResponseEntity.ok(Map.of(
+                    "started", false, "running", true,
+                    "message", "Une opération est déjà en cours."));
+        }
+        try {
+            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+            lorcaJsonService.startSyncFromContent(content);
+            return ResponseEntity.ok(Map.of("started", true, "message", "Synchronisation démarrée depuis le fichier."));
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of(
-                    "success", false,
-                    "message", "Sync failed: " + e.getMessage()
-            ));
+            return ResponseEntity.badRequest().body(Map.of(
+                    "started", false, "message", e.getMessage()));
         }
     }
 
-    @GetMapping("/api-status")
-    public ResponseEntity<Map<String, Object>> getApiStatus() {
-        return ResponseEntity.ok(Map.of(
-                "enabled", externalApiService.isApiEnabled(),
-                "url", externalApiService.getApiUrl()
-        ));
+    /** Asynchronously compute perceptual hashes for cards without one. */
+    @PostMapping("/compute-hashes")
+    public ResponseEntity<Map<String, Object>> computeHashes() {
+        if (lorcaJsonService.isRunning()) {
+            return ResponseEntity.ok(Map.of(
+                    "started", false, "running", true,
+                    "message", "Une opération est déjà en cours."));
+        }
+        lorcaJsonService.startComputeHashes();
+        return ResponseEntity.ok(Map.of("started", true, "message", "Calcul des empreintes démarré."));
+    }
+
+    @GetMapping("/lorcajson-url")
+    public ResponseEntity<Map<String, Object>> getLorcaJsonUrl() {
+        return ResponseEntity.ok(Map.of("url", lorcaJsonService.getLorcaJsonUrl()));
     }
 
     @GetMapping("/export")

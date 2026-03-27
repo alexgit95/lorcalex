@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/auth")
 public class AuthController {
 
+    // 12 months in milliseconds
+    private static final long REMEMBER_ME_EXPIRATION = 365L * 24 * 60 * 60 * 1000;
+
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
 
@@ -34,8 +37,9 @@ public class AuthController {
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
         UserDetails userDetails = (UserDetails) auth.getPrincipal();
-        String token = jwtTokenProvider.generateToken(userDetails.getUsername());
-        return ResponseEntity.ok(new AuthResponse(token, userDetails.getUsername(), jwtExpiration));
+        long expiry = request.isRememberMe() ? REMEMBER_ME_EXPIRATION : jwtExpiration;
+        String token = jwtTokenProvider.generateToken(userDetails.getUsername(), expiry);
+        return ResponseEntity.ok(new AuthResponse(token, userDetails.getUsername(), expiry));
     }
 
     @GetMapping("/me")

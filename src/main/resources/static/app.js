@@ -1,15 +1,24 @@
 // ─── API ─────────────────────────────────────────────────────────────────────
 
+function getToken() {
+  return localStorage.getItem('token') || sessionStorage.getItem('token');
+}
+
+function removeToken() {
+  localStorage.removeItem('token');
+  sessionStorage.removeItem('token');
+  localStorage.removeItem('username');
+}
+
 async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem('token');
+  const token = getToken();
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch('/api' + path, { ...options, headers });
 
   if (response.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
+    removeToken();
     navigate('login');
     throw new Error('Non autorisé');
   }
@@ -26,8 +35,8 @@ async function apiFetch(path, options = {}) {
 }
 
 const api = {
-  login: (username, password) =>
-    apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  login: (username, password, rememberMe = false) =>
+    apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ username, password, rememberMe }) }),
 
   getEditions: () => apiFetch('/editions'),
 
@@ -43,6 +52,8 @@ const api = {
     if (editionId) params.set('editionId', String(editionId));
     return apiFetch('/cards/lookup?' + params);
   },
+
+  getFingerprints: () => apiFetch('/cards/fingerprints'),
 
   addToCollection: (cardId, quantity = 1) =>
     apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity }) }),
@@ -60,9 +71,29 @@ const api = {
   updateSetting: (key, value) =>
     apiFetch(`/admin/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
 
-  syncCards: () => apiFetch('/admin/sync', { method: 'POST' }),
+  syncFromUrl: (url) =>
+    apiFetch('/admin/sync/url', { method: 'POST', body: JSON.stringify({ url }) }),
 
-  getApiStatus: () => apiFetch('/admin/api-status'),
+  syncFromFile: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getToken();
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch('/api/admin/sync/file', { method: 'POST', headers, body: formData })
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+        return json;
+      });
+  },
+
+  getLorcaJsonUrl: () => apiFetch('/admin/lorcajson-url'),
+
+  getProgress: () => apiFetch('/admin/progress'),
+
+  computeHashes: () => apiFetch('/admin/compute-hashes', { method: 'POST' }),
+
   exportCollection: () => apiFetch('/admin/export'),
   importCollection: (data) => apiFetch('/admin/import', { method: 'POST', body: JSON.stringify(data) }),
 };
@@ -74,7 +105,7 @@ function currentPage() {
 }
 
 function navigate(page) {
-  const authenticated = !!localStorage.getItem('token');
+  const authenticated = !!getToken();
   if (!authenticated && page !== 'login') {
     location.hash = '#/login';
     return;
@@ -90,7 +121,7 @@ window.addEventListener('hashchange', handleRoute);
 
 function handleRoute() {
   const page = currentPage();
-  const authenticated = !!localStorage.getItem('token');
+  const authenticated = !!getToken();
 
   if (!authenticated && page !== 'login') {
     navigate('login');
@@ -102,6 +133,7 @@ function handleRoute() {
   }
 
   stopCamera(); // clean up scanner camera if leaving scanner page
+  stopSyncPoll(); // stop admin progress polling
   renderPage(page);
 }
 
@@ -173,6 +205,10 @@ function renderLogin() {
             <label>Mot de passe</label>
             <input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" required />
           </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+            <input id="rememberMe" type="checkbox" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)" />
+            <label for="rememberMe" style="font-size:.9rem;color:var(--text-muted);cursor:pointer;margin:0">Se souvenir de moi (12 mois)</label>
+          </div>
           <button type="submit" id="loginBtn" class="btn btn-accent btn-full">Se connecter</button>
         </form>
       </div>
@@ -186,11 +222,17 @@ function renderLogin() {
     btn.textContent = 'Connexion…';
     errDiv.innerHTML = '';
     try {
+      const rememberMe = document.getElementById('rememberMe').checked;
       const data = await api.login(
         document.getElementById('loginUser').value,
         document.getElementById('loginPass').value,
+        rememberMe
       );
-      localStorage.setItem('token', data.token);
+      if (rememberMe) {
+        localStorage.setItem('token', data.token);
+      } else {
+        sessionStorage.setItem('token', data.token);
+      }
       localStorage.setItem('username', data.username);
       navigate('collection');
     } catch {
@@ -262,9 +304,10 @@ function renderEditionBar() {
   if (!bar) return;
   bar.innerHTML = [
     `<button class="filter-chip${collState.edition === 'all' ? ' active' : ''}" data-edition="all">Toutes</button>`,
-    ...collState.editions.map(e =>
-      `<button class="filter-chip${collState.edition == e.id ? ' active' : ''}" data-edition="${e.id}">${esc(e.code || e.name)}</button>`
-    ),
+    ...collState.editions.map(e => {
+      const label = e.setNumber ? `Set ${e.setNumber} — ${esc(e.name)}` : esc(e.code || e.name);
+      return `<button class="filter-chip${collState.edition == e.id ? ' active' : ''}" data-edition="${e.id}">${label}</button>`;
+    }),
   ].join('');
 
   bar.addEventListener('click', e => {
@@ -287,7 +330,21 @@ function loadCards() {
   });
 }
 
-const RARITY_COLORS = { Common:'#bdbdbd', Uncommon:'#81d4fa', Rare:'#ce93d8', 'Super Rare':'#ffb74d', Legendary:'#fff176', Enchanted:'#f48fb1' };
+const RARITY_COLORS = {
+  // French rarities (LorcaJson)
+  'Habituelle':   '#bdbdbd',
+  'Inhabituelle': '#81d4fa',
+  'Rare':         '#ce93d8',
+  'Très Rare':    '#ffb74d',
+  'Légendaire':   '#fff176',
+  'Enchanté':     '#f48fb1',
+  // English fallbacks
+  'Common':     '#bdbdbd',
+  'Uncommon':   '#81d4fa',
+  'Super Rare': '#ffb74d',
+  'Legendary':  '#fff176',
+  'Enchanted':  '#f48fb1',
+};
 
 function renderCards() {
   const { cards, filter, search } = collState;
@@ -308,7 +365,7 @@ function renderCards() {
     area.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 16H6c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h12c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1z"/></svg>
       <h3>Aucune carte</h3>
-      <p>Essayez de synchroniser depuis l'API externe (Admin).</p>
+      <p>Importez le catalogue depuis la page Administration.</p>
     </div>`;
     return;
   }
@@ -321,13 +378,14 @@ function renderCards() {
 
 function cardItemHTML(card) {
   const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
   return `<div class="card-item ${card.owned ? 'owned' : 'missing'}" data-id="${card.id}">
     ${card.imageUrl
       ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
     ${card.owned ? `<div class="owned-badge">${card.quantity > 1 ? card.quantity : '✓'}</div>` : ''}
     <div class="card-info">
-      <div class="card-number">#${esc(card.cardNumber)}</div>
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
       <div class="card-name">${esc(card.name)}</div>
       ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
     </div>
@@ -339,29 +397,38 @@ function openModal(cardId) {
   if (!card) return;
   collState.modal = card;
 
-  const rarityClass = (card.rarity || '').replace(' ', '-');
   document.getElementById('modalArea').innerHTML = `
     <div class="modal-overlay" id="modalOverlay">
-      <div class="modal" id="modalContent">
-        <div style="display:flex;gap:16px;margin-bottom:16px">
-          ${card.imageUrl ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" style="width:100px;border-radius:8px" onerror="this.style.display='none'" />` : ''}
-          <div>
-            <div style="font-size:.75rem;color:var(--text-muted)">#${esc(card.cardNumber)} • ${esc(card.editionCode)}</div>
-            <h2 style="margin-bottom:8px">${esc(card.name)}</h2>
-            <div class="rarity-${esc(rarityClass)}" style="font-size:.85rem;font-weight:600">${esc(card.rarity)}</div>
-            <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">${esc(card.inkColor)} • ${esc(card.type)}</div>
+      <div class="modal-card-detail" id="modalContent">
+        <button class="modal-close-btn" id="modalCloseBtn" aria-label="Fermer">✕</button>
+
+        ${card.imageUrl
+          ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" class="modal-card-image"
+               onerror="this.style.display='none'" />`
+          : `<div class="modal-card-placeholder">🃏</div>`}
+
+        <div class="modal-card-info">
+          <div class="modal-card-meta">
+            ${card.editionSetNumber ? `<span class="modal-set-badge">Set ${card.editionSetNumber}</span>` : ''}
+            <span style="color:var(--text-muted);font-size:.8rem">#${esc(card.cardNumber)}</span>
           </div>
-        </div>
-        ${card.bodyText ? `<p style="font-size:.85rem;color:var(--text-muted);margin-bottom:16px">${esc(card.bodyText)}</p>` : ''}
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <span style="font-weight:600">${card.owned ? `Possédée (×${card.quantity})` : 'Non possédée'}</span>
-          ${card.owned
-            ? `<div class="qty-control">
-                <button class="qty-btn" id="qtyMinus">−</button>
-                <span class="qty-value" id="qtyVal">${card.quantity}</span>
-                <button class="qty-btn" id="qtyPlus">＋</button>
-               </div>`
-            : `<button class="btn btn-accent" id="addCardBtn">+ Ajouter</button>`}
+          <h2 class="modal-card-name">${esc(card.name)}</h2>
+          ${card.rarity
+            ? `<div style="font-size:.85rem;font-weight:600;margin-bottom:12px;color:${RARITY_COLORS[card.rarity]||'var(--text-muted)'}">${esc(card.rarity)}</div>`
+            : ''}
+
+          <div class="modal-qty-section">
+            ${card.owned
+              ? `<div style="display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:.9rem;color:var(--text-muted)">En collection</span>
+                  <div class="qty-control">
+                    <button class="qty-btn" id="qtyMinus">−</button>
+                    <span class="qty-value" id="qtyVal">${card.quantity}</span>
+                    <button class="qty-btn" id="qtyPlus">＋</button>
+                  </div>
+                </div>`
+              : `<button class="btn btn-accent btn-full" id="addCardBtn">+ Ajouter à la collection</button>`}
+          </div>
         </div>
       </div>
     </div>`;
@@ -369,6 +436,7 @@ function openModal(cardId) {
   document.getElementById('modalOverlay').addEventListener('click', e => {
     if (e.target === document.getElementById('modalOverlay')) closeModal();
   });
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
   document.getElementById('modalContent').addEventListener('click', e => e.stopPropagation());
 
   if (card.owned) {
@@ -448,7 +516,7 @@ async function doAddSearch(query) {
               ? `<img src="${esc(c.imageUrl)}" alt="" style="width:44px;border-radius:6px;flex-shrink:0" onerror="this.style.display='none'" />`
               : `<div style="width:44px;height:62px;background:var(--bg-card2);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem">🃏</div>`}
             <div style="min-width:0">
-              <div style="font-size:.7rem;color:var(--text-muted)">#${esc(c.cardNumber)} • ${esc(c.editionCode)}</div>
+              <div style="font-size:.7rem;color:var(--text-muted)">${c.editionSetNumber ? `Set ${c.editionSetNumber} · ` : ''}#${esc(c.cardNumber)} • ${esc(c.editionCode)}</div>
               <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}</div>
               <div style="font-size:.75rem;color:var(--text-muted)">${esc(c.rarity || '')}</div>
             </div>
@@ -679,10 +747,9 @@ function renderStatistics() {
   });
 }
 
-// ─── SCANNER ──────────────────────────────────────────────────────────────────
+// ─── SCANNER ─ Fingerprint-based full-card recognition ────────────────────────
 
 let _cameraStream = null;
-let _ocrWorker = null;
 
 function stopCamera() {
   if (_cameraStream) {
@@ -691,86 +758,76 @@ function stopCamera() {
   }
 }
 
-async function getOcrWorker() {
-  if (!_ocrWorker) {
-    _ocrWorker = await Tesseract.createWorker('eng', 1, {
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-lstm.wasm.js',
-    });
-    await _ocrWorker.setParameters({ tessedit_char_whitelist: '0123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -' });
+// Perceptual hash (average hash) — computed entirely client-side
+function computeAHash(sourceCanvas, hashSize = 8) {
+  const small = document.createElement('canvas');
+  small.width = hashSize;
+  small.height = hashSize;
+  const ctx = small.getContext('2d');
+  ctx.drawImage(sourceCanvas, 0, 0, hashSize, hashSize);
+  const data = ctx.getImageData(0, 0, hashSize, hashSize).data;
+
+  const grays = new Array(hashSize * hashSize);
+  let sum = 0;
+  for (let i = 0; i < grays.length; i++) {
+    const g = Math.round(0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]);
+    grays[i] = g;
+    sum += g;
   }
-  return _ocrWorker;
-}
-
-function extractCardNumber(text) {
-  const slashMatch = text.match(/\b(\d{1,3})\/(\d{1,3})\b/);
-  if (slashMatch) return { cardNumber: parseInt(slashMatch[1]), totalInSet: parseInt(slashMatch[2]) };
-  const numMatch = text.match(/\b(\d{1,3})\b/);
-  if (numMatch) return { cardNumber: parseInt(numMatch[1]), totalInSet: null };
-  return null;
-}
-
-function preprocessCanvas(source) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const cropRatio = 0.18;
-  const cropY = Math.floor(source.height * (1 - cropRatio));
-  const cropH = source.height - cropY;
-  canvas.width = source.width;
-  canvas.height = cropH;
-  ctx.drawImage(source, 0, cropY, source.width, cropH, 0, 0, source.width, cropH);
-  const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  for (let i = 0; i < id.data.length; i += 4) {
-    const g = 0.299 * id.data[i] + 0.587 * id.data[i+1] + 0.114 * id.data[i+2];
-    const v = g > 128 ? 255 : 0;
-    id.data[i] = id.data[i+1] = id.data[i+2] = v;
+  const avg = sum / grays.length;
+  let hash = 0n;
+  for (let i = 0; i < grays.length; i++) {
+    if (grays[i] >= avg) hash |= (1n << BigInt(i));
   }
-  ctx.putImageData(id, 0, 0);
-  return canvas;
+  return hash;
 }
 
-async function recognizeFromVideo(video) {
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  const processed = preprocessCanvas(canvas);
-  const worker = await getOcrWorker();
-  const { data: { text } } = await worker.recognize(processed);
-  return extractCardNumber(text);
+function hammingDistance(a, b) {
+  let diff = a ^ b;
+  let count = 0;
+  while (diff > 0n) { count += Number(diff & 1n); diff >>= 1n; }
+  return count;
 }
 
-function playBeep(freq = 880, dur = 200) {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.frequency.value = freq;
-    osc.start(); gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur / 1000);
-    osc.stop(ctx.currentTime + dur / 1000);
-  } catch { /* Web Audio not available */ }
+function hexToBigInt(hex) {
+  if (!hex) return 0n;
+  return BigInt('0x' + hex);
 }
 
-let _scanState = { editions: [], selectedEdition: '', scanning: false, foundCards: [] };
+let _fingerprintsCache = null;
+let _syncPolling = null;
+
+async function loadFingerprints() {
+  if (_fingerprintsCache) return _fingerprintsCache;
+  _fingerprintsCache = await api.getFingerprints();
+  return _fingerprintsCache;
+}
+
+function findBestMatch(queryHash, fingerprints) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const fp of fingerprints) {
+    const dist = hammingDistance(queryHash, hexToBigInt(fp.h));
+    if (dist < bestDist) { bestDist = dist; best = fp; }
+  }
+  return best ? { ...best, distance: bestDist } : null;
+}
+
+// Max Hamming distance to accept a match (out of 64 bits)
+const MATCH_THRESHOLD = 20;
+
+let _scanState = { scanning: false };
 
 function renderScanner() {
   document.getElementById('app').innerHTML = `
     <div class="app">
       <div class="page">
         <div class="page-header"><h1>📷 Scanner</h1></div>
-        <div style="padding:10px 12px">
-          <select class="search-input" id="scanEditionSelect">
-            <option value="">Toutes les éditions</option>
-          </select>
-        </div>
         <div id="scanCameraArea"></div>
         <div id="scanAlerts"></div>
         <div style="padding:12px">
           <div style="display:flex;gap:8px">
-            <input class="search-input" id="manualNum" type="number" placeholder="Numéro manuel…" min="1" style="border-radius:8px" />
+            <input class="search-input" id="manualNum" type="number" placeholder="Numéro de carte manuel…" min="1" style="border-radius:8px" />
             <button class="btn btn-ghost" id="manualLookupBtn" style="flex-shrink:0">Chercher</button>
           </div>
         </div>
@@ -779,57 +836,34 @@ function renderScanner() {
       ${navHTML('scanner')}
     </div>`;
 
-  // Load editions
-  if (_scanState.editions.length === 0) {
-    api.getEditions().then(data => {
-      _scanState.editions = data;
-      if (data.length > 0) _scanState.selectedEdition = String(data[0].id);
-      const sel = document.getElementById('scanEditionSelect');
-      if (sel) {
-        data.forEach(e => {
-          const opt = document.createElement('option');
-          opt.value = e.id;
-          opt.textContent = `${e.name} (${e.code})`;
-          sel.appendChild(opt);
-        });
-        sel.value = _scanState.selectedEdition;
-      }
-    });
-  } else {
-    const sel = document.getElementById('scanEditionSelect');
-    if (sel) {
-      _scanState.editions.forEach(e => {
-        const opt = document.createElement('option');
-        opt.value = e.id;
-        opt.textContent = `${e.name} (${e.code})`;
-        sel.appendChild(opt);
-      });
-      sel.value = _scanState.selectedEdition;
-    }
-  }
-
-  document.getElementById('scanEditionSelect').addEventListener('change', e => {
-    _scanState.selectedEdition = e.target.value;
-  });
-
-  // Start camera
   const cameraArea = document.getElementById('scanCameraArea');
-  navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } })
+  navigator.mediaDevices?.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+  })
     .then(stream => {
       _cameraStream = stream;
       cameraArea.innerHTML = `
         <div class="scanner-container">
           <video id="scanVideo" class="scanner-video" autoplay playsinline muted></video>
-          <div class="scanner-overlay"><div class="scanner-frame"></div></div>
+          <div class="scanner-overlay">
+            <div class="scanner-card-frame">
+              <span class="scanner-corner tl"></span>
+              <span class="scanner-corner tr"></span>
+              <span class="scanner-corner bl"></span>
+              <span class="scanner-corner br"></span>
+            </div>
+          </div>
         </div>
         <div style="padding:14px 12px">
-          <button class="btn btn-accent btn-full" id="captureBtn">📷 Scanner la carte</button>
+          <button class="btn btn-accent btn-full" id="captureBtn">📷 Identifier la carte</button>
           <p style="text-align:center;font-size:.75rem;color:var(--text-muted);margin-top:8px">
-            Positionnez le bas de la carte dans le cadre pour lire le numéro.
+            Centrez la carte entière dans le cadre, puis appuyez sur le bouton.
           </p>
         </div>`;
       document.getElementById('scanVideo').srcObject = stream;
       document.getElementById('captureBtn').addEventListener('click', handleCapture);
+      // Pre-load fingerprints while user aims the camera
+      loadFingerprints().catch(() => {});
     })
     .catch(() => {
       cameraArea.innerHTML = `<div class="alert alert-warning" style="margin:12px">Caméra non disponible. Utilisez la saisie manuelle ci-dessous.</div>`;
@@ -848,24 +882,40 @@ async function handleCapture() {
   document.getElementById('foundCardsArea').innerHTML = '';
   const btn = document.getElementById('captureBtn');
   btn.disabled = true;
-  btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Analyse OCR…`;
+  btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Chargement des empreintes…`;
 
   try {
-    const result = await recognizeFromVideo(video);
-    if (!result) {
-      setScanAlert('Numéro de carte non détecté. Essayez la saisie manuelle.', 'error');
+    const fingerprints = await loadFingerprints();
+    if (!fingerprints || fingerprints.length === 0) {
+      setScanAlert('Aucune empreinte disponible. Importez d\'abord le catalogue depuis Administration.', 'error');
       return;
     }
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Numéro détecté: ${result.cardNumber} — Recherche…`;
-    const editionId = _scanState.selectedEdition ? parseInt(_scanState.selectedEdition) : undefined;
-    const cards = await api.lookupCard(result.cardNumber, editionId);
-    await handleFoundCards(cards, result.cardNumber);
+
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Analyse…`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    const queryHash = computeAHash(canvas);
+    const match = findBestMatch(queryHash, fingerprints);
+
+    if (!match || match.distance > MATCH_THRESHOLD) {
+      setScanAlert(`Carte non reconnue (score: ${match?.distance ?? '?'}/64). Essayez un meilleur éclairage ou la saisie manuelle.`, 'error');
+      return;
+    }
+
+    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Carte reconnue — Chargement…`;
+    const cards = await api.lookupCard(match.n, undefined);
+    const matchedCards = cards.filter(c => c.editionCode === match.s);
+    await handleFoundCards(matchedCards.length > 0 ? matchedCards : cards, match.n);
   } catch (e) {
-    setScanAlert('Erreur: ' + e.message, 'error');
+    setScanAlert('Erreur : ' + e.message, 'error');
   } finally {
     _scanState.scanning = false;
     const b = document.getElementById('captureBtn');
-    if (b) { b.disabled = false; b.textContent = '📷 Scanner la carte'; }
+    if (b) { b.disabled = false; b.textContent = '📷 Identifier la carte'; }
   }
 }
 
@@ -876,8 +926,7 @@ async function handleManualLookup() {
   setScanAlert('');
   document.getElementById('foundCardsArea').innerHTML = '';
   try {
-    const editionId = _scanState.selectedEdition ? parseInt(_scanState.selectedEdition) : undefined;
-    const cards = await api.lookupCard(num, editionId);
+    const cards = await api.lookupCard(num, undefined);
     await handleFoundCards(cards, num);
   } catch (e) {
     setScanAlert('Erreur: ' + e.message, 'error');
@@ -886,7 +935,7 @@ async function handleManualLookup() {
 
 async function handleFoundCards(cards, num) {
   if (cards.length === 0) {
-    setScanAlert(`Carte #${num} non trouvée. Synchronisez d'abord via Admin.`, 'error');
+    setScanAlert(`Carte #${num} non trouvée. Importez d'abord le catalogue via Administration.`, 'error');
   } else if (cards.length === 1) {
     await autoAddCard(cards[0]);
   } else {
@@ -916,7 +965,7 @@ function renderFoundCards(cards) {
       <button class="btn btn-ghost btn-full" style="margin-bottom:8px;justify-content:flex-start;gap:12px" data-cardid="${c.id}">
         ${c.imageUrl ? `<img src="${esc(c.imageUrl)}" alt="" style="width:36px;border-radius:4px" onerror="this.style.display='none'" />` : ''}
         <div style="text-align:left">
-          <div style="font-weight:700">#${esc(c.cardNumber)} — ${esc(c.name)}</div>
+          <div style="font-weight:700">${c.editionSetNumber ? `Set ${c.editionSetNumber} · ` : ''}#${esc(c.cardNumber)} — ${esc(c.name)}</div>
           <div style="font-size:.75rem;color:var(--text-muted)">${esc(c.editionCode)} • ${esc(c.rarity)}</div>
         </div>
       </button>`).join('')}
@@ -936,7 +985,81 @@ function setScanAlert(msg, type = 'success') {
   el.innerHTML = msg ? `<div class="alert alert-${type}" style="margin:0 12px 10px">${esc(msg)}</div>` : '';
 }
 
+function playBeep(freq = 880, dur = 200) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    osc.start(); gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur / 1000);
+    osc.stop(ctx.currentTime + dur / 1000);
+  } catch { /* Web Audio not available */ }
+}
+
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
+
+function startSyncPoll() {
+  stopSyncPoll();
+  _syncPolling = setInterval(async () => {
+    try {
+      const p = await api.getProgress();
+      updateAdminProgress(p);
+      if (!p.running) {
+        stopSyncPoll();
+        setSyncBusy(false);
+      }
+    } catch { stopSyncPoll(); }
+  }, 900);
+}
+
+function stopSyncPoll() {
+  if (_syncPolling) { clearInterval(_syncPolling); _syncPolling = null; }
+}
+
+function updateAdminProgress(p) {
+  const box = document.getElementById('adminProgressBox');
+  if (!box) return;
+  const visible = p.running || p.phase === 'done' || p.phase === 'error';
+  box.style.display = visible ? 'block' : 'none';
+  if (!visible) return;
+
+  const PHASE = {
+    downloading: '⬇️ Téléchargement',
+    parsing:     '📄 Analyse JSON',
+    sync:        '🔄 Synchronisation',
+    hashing:     '🔍 Calcul empreintes',
+    done:        '✅ Terminé',
+    error:       '❌ Erreur',
+  };
+  const pct = p.percent ?? 0;
+  const isIndeterminate = p.running && p.total === 0;
+  const color = p.error ? 'var(--danger)' : p.phase === 'done' ? 'var(--success)' : 'var(--accent)';
+  const barFill = isIndeterminate
+    ? `<div style="height:100%;border-radius:10px;background:${color};width:30%;animation:syncIndeterminate 1.2s ease-in-out infinite"></div>`
+    : `<div class="progress-bar-fill" style="width:${pct}%;background:${color}"></div>`;
+
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-weight:700;font-size:.9rem">${PHASE[p.phase] || p.phase}</span>
+      <span style="font-size:.9rem;font-weight:700;color:${color}">${p.total > 0 ? pct + '%' : (p.running ? '…' : '')}</span>
+    </div>
+    <div class="progress-bar" style="overflow:hidden">${barFill}</div>
+    <div style="display:flex;justify-content:space-between;margin-top:6px">
+      <span style="font-size:.78rem;color:var(--text-muted)">${esc(p.message)}</span>
+      ${p.total > 0 ? `<span style="font-size:.78rem;color:var(--text-muted);font-weight:600">${p.current}\u202f/\u202f${p.total}</span>` : ''}
+    </div>`;
+}
+
+function setSyncBusy(busy) {
+  ['syncUrlBtn', 'computeHashesBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
+  const fi = document.getElementById('lorcajsonFile');
+  if (fi) fi.disabled = busy;
+}
 
 function renderAdmin() {
   document.getElementById('app').innerHTML = `
@@ -952,42 +1075,67 @@ function renderAdmin() {
     </div>`;
 
   document.getElementById('logoutBtn').addEventListener('click', () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
+    removeToken();
     collState.editions = [];
     collState.cards = [];
+    _fingerprintsCache = null;
+    stopSyncPoll();
     navigate('login');
   });
 
-  Promise.all([api.getSettings(), api.getApiStatus()]).then(([settings, status]) => {
+  Promise.all([api.getSettings(), api.getLorcaJsonUrl(), api.getProgress()]).then(([settings, urlData, progressData]) => {
     const content = document.getElementById('adminContent');
     if (!content) return;
+    const currentUrl = urlData.url || 'https://lorcanajson.org/files/current/fr/allCards.json';
 
     content.innerHTML = `
+      <!-- Étape 1 : Synchronisation -->
       <div class="edition-item" style="margin-bottom:12px">
-        <h3 style="margin-bottom:12px">API Externe Lorcana</h3>
-        <div class="toggle-row">
-          <div>
-            <div class="toggle-label">Activer l'API externe</div>
-            <div class="toggle-desc">Permet de synchroniser les cartes depuis internet</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <span style="background:var(--accent);color:#fff;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">1</span>
+          <h3 style="margin:0">Synchronisation des cartes</h3>
+        </div>
+
+        <div style="margin-bottom:12px">
+          <label style="font-size:.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Depuis une URL LorcaJson</label>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <input type="url" id="lorcajsonUrl" value="${esc(currentUrl)}"
+              placeholder="https://lorcanajson.org/files/current/fr/allCards.json"
+              style="flex:1;border-radius:8px;font-size:.85rem" />
+            <button class="btn btn-ghost" id="saveUrlBtn" style="flex-shrink:0;padding:8px 12px" title="Sauvegarder l'URL">💾</button>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="apiToggle" ${status.enabled ? 'checked' : ''} />
-            <span class="toggle-slider"></span>
+          <button class="btn btn-accent btn-full" id="syncUrlBtn">🔄 Importer depuis l'URL</button>
+          <div id="urlSaveResult" style="margin-top:4px"></div>
+        </div>
+
+        <div>
+          <label style="font-size:.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Depuis un fichier local</label>
+          <label class="btn btn-ghost btn-full" style="cursor:pointer">
+            📁 Choisir le fichier allCards.json
+            <input type="file" id="lorcajsonFile" accept=".json" style="display:none" />
           </label>
         </div>
-        <div class="form-group" style="margin-top:16px;margin-bottom:8px">
-          <label>URL de l'API</label>
-          <input type="url" id="apiUrl" value="${esc(status.url)}" placeholder="https://api.lorcana-api.com/cards/all" />
-        </div>
-        <button class="btn btn-ghost btn-full" id="saveUrlBtn" style="margin-bottom:16px">💾 Sauvegarder l'URL</button>
-        <button class="btn btn-accent btn-full" id="syncBtn" ${status.enabled ? '' : 'disabled'}>🔄 Synchroniser les cartes</button>
-        ${!status.enabled ? `<p style="font-size:.78rem;color:var(--text-muted);margin-top:8px;text-align:center">Activez l'API externe pour pouvoir synchroniser.</p>` : ''}
       </div>
-      <div id="syncResult"></div>
 
-      <div class="edition-item" style="margin-top:12px">
-        <h3 style="margin-bottom:12px">Import / Export</h3>
+      <!-- Progression (partagée étapes 1 & 2) -->
+      <div id="adminProgressBox" class="edition-item" style="margin-bottom:12px;display:none"></div>
+
+      <!-- Étape 2 : Empreintes -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="background:var(--primary-light);color:#fff;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">2</span>
+          <h3 style="margin:0">Empreintes visuelles (scanner)</h3>
+        </div>
+        <p style="font-size:.83rem;color:var(--text-muted);margin-bottom:10px;line-height:1.5">
+          Après la synchronisation, calculez les empreintes visuelles des cartes pour la reconnaissance par scanner.
+          Cette opération télécharge chaque vignette — elle peut prendre plusieurs minutes.
+        </p>
+        <button class="btn btn-ghost btn-full" id="computeHashesBtn">🔍 Calculer les empreintes</button>
+      </div>
+
+      <!-- Collection Import / Export -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">Collection — Import / Export</h3>
         <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
           Sauvegardez ou restaurez l'intégralité de votre collection au format JSON.
         </p>
@@ -999,7 +1147,8 @@ function renderAdmin() {
         <div id="importExportResult" style="margin-top:8px"></div>
       </div>
 
-      <div class="edition-item" style="margin-top:12px">
+      <!-- Paramètres -->
+      <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Paramètres</h3>
         ${settings.map(s => `
           <div style="margin-bottom:10px">
@@ -1008,43 +1157,103 @@ function renderAdmin() {
             <div style="font-size:.9rem;font-weight:600;margin-top:2px">${esc(s.settingValue)}</div>
           </div>`).join('')}
       </div>
-      <div class="edition-item" style="margin-top:12px">
+
+      <div class="edition-item">
         <h3 style="margin-bottom:8px">Informations</h3>
         <p style="font-size:.85rem;color:var(--text-muted);line-height:1.7">
-          <strong style="color:var(--text)">Lorcalex</strong> — Gestionnaire de collection Lorcana.<br/>
+          <strong style="color:var(--text)">Lorcalex</strong> — Gestionnaire de collection Lorcana (FR).<br/>
           Backend : Spring Boot + ${location.hostname === 'localhost' ? 'SQLite (local)' : 'PostgreSQL (Docker)'}<br/>
-          Frontend : HTML/JS vanilla (intégré au JAR)
+          Source cartes : <a href="https://lorcanajson.org" target="_blank" rel="noopener" style="color:var(--accent)">lorcanajson.org</a>
         </p>
       </div>`;
 
-    document.getElementById('apiToggle').addEventListener('change', async e => {
-      const enabled = e.target.checked;
-      await api.updateSetting('external_api_enabled', enabled ? 'true' : 'false');
-      const syncBtn = document.getElementById('syncBtn');
-      if (syncBtn) syncBtn.disabled = !enabled;
-    });
+    // ── Initialise progress from server state ──────────────────────────────
+    updateAdminProgress(progressData);
+    if (progressData.running) {
+      setSyncBusy(true);
+      startSyncPoll();
+    }
 
+    // ── Save URL ───────────────────────────────────────────────────────────
     document.getElementById('saveUrlBtn').addEventListener('click', async () => {
-      const url = document.getElementById('apiUrl').value;
-      await api.updateSetting('external_api_url', url);
-      showSyncResult({ success: true, message: 'URL sauvegardée.' });
-    });
-
-    document.getElementById('syncBtn').addEventListener('click', async () => {
-      const btn = document.getElementById('syncBtn');
-      btn.disabled = true;
-      btn.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Synchronisation…`;
-      try {
-        const result = await api.syncCards();
-        showSyncResult(result);
-      } catch (e) {
-        showSyncResult({ success: false, message: e.message || 'Erreur lors de la sync.' });
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '🔄 Synchroniser les cartes';
+      const url = document.getElementById('lorcajsonUrl').value.trim();
+      await api.updateSetting('lorcajson_url', url);
+      const el = document.getElementById('urlSaveResult');
+      if (el) {
+        el.innerHTML = `<div class="alert alert-success" style="padding:6px 10px;font-size:.8rem">URL sauvegardée.</div>`;
+        setTimeout(() => { if (el) el.innerHTML = ''; }, 3000);
       }
     });
 
+    // ── Sync from URL ──────────────────────────────────────────────────────
+    document.getElementById('syncUrlBtn').addEventListener('click', async () => {
+      const url = document.getElementById('lorcajsonUrl').value.trim();
+      setSyncBusy(true);
+      try {
+        const result = await api.syncFromUrl(url);
+        if (result.started) {
+          _fingerprintsCache = null;
+          collState.cards = [];
+          collState.editions = [];
+          startSyncPoll();
+        } else {
+          setSyncBusy(false);
+          updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+            message: result.message, running: false, error: true });
+        }
+      } catch (e) {
+        setSyncBusy(false);
+        updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+          message: e.message, running: false, error: true });
+      }
+    });
+
+    // ── Sync from file ─────────────────────────────────────────────────────
+    document.getElementById('lorcajsonFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      e.target.value = '';
+      setSyncBusy(true);
+      try {
+        const result = await api.syncFromFile(file);
+        if (result.started) {
+          _fingerprintsCache = null;
+          collState.cards = [];
+          collState.editions = [];
+          startSyncPoll();
+        } else {
+          setSyncBusy(false);
+          updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+            message: result.message, running: false, error: true });
+        }
+      } catch (err) {
+        setSyncBusy(false);
+        updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+          message: err.message, running: false, error: true });
+      }
+    });
+
+    // ── Compute hashes ─────────────────────────────────────────────────────
+    document.getElementById('computeHashesBtn').addEventListener('click', async () => {
+      setSyncBusy(true);
+      try {
+        const result = await api.computeHashes();
+        if (result.started) {
+          _fingerprintsCache = null;
+          startSyncPoll();
+        } else {
+          setSyncBusy(false);
+          updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+            message: result.message, running: false, error: true });
+        }
+      } catch (e) {
+        setSyncBusy(false);
+        updateAdminProgress({ phase: 'error', percent: 0, current: 0, total: 0,
+          message: e.message, running: false, error: true });
+      }
+    });
+
+    // ── Export collection ──────────────────────────────────────────────────
     document.getElementById('exportBtn').addEventListener('click', async () => {
       try {
         const data = await api.exportCollection();
@@ -1055,12 +1264,13 @@ function renderAdmin() {
         a.download = `lorcalex-export-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
-        showImportExportResult({ success: true, message: `${data.totalEntries} carte(s) exportée(s).` });
+        showAdminResult('importExportResult', { success: true, message: `${data.totalEntries} carte(s) exportée(s).` });
       } catch (e) {
-        showImportExportResult({ success: false, message: 'Erreur export : ' + e.message });
+        showAdminResult('importExportResult', { success: false, message: 'Erreur export : ' + e.message });
       }
     });
 
+    // ── Import collection ──────────────────────────────────────────────────
     document.getElementById('importFile').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -1068,10 +1278,10 @@ function renderAdmin() {
         const text = await file.text();
         const data = JSON.parse(text);
         const result = await api.importCollection(data);
-        showImportExportResult(result);
-        collState.cards = []; // invalidate card cache so collection refreshes
+        showAdminResult('importExportResult', result);
+        collState.cards = [];
       } catch (err) {
-        showImportExportResult({ success: false, message: 'Erreur import : ' + err.message });
+        showAdminResult('importExportResult', { success: false, message: 'Erreur import : ' + err.message });
       } finally {
         e.target.value = '';
       }
@@ -1079,18 +1289,13 @@ function renderAdmin() {
   });
 }
 
-function showImportExportResult(result) {
-  const el = document.getElementById('importExportResult');
+function showAdminResult(elementId, result) {
+  const el = document.getElementById(elementId);
   if (!el) return;
   el.innerHTML = `<div class="alert ${result.success ? 'alert-success' : 'alert-error'}">${esc(result.message)}</div>`;
-  setTimeout(() => { if (el) el.innerHTML = ''; }, 5000);
-}
-
-function showSyncResult(result) {
-  const el = document.getElementById('syncResult');
-  if (!el) return;
-  el.innerHTML = `<div class="alert ${result.success ? 'alert-success' : 'alert-error'}">${esc(result.message)}</div>`;
-  setTimeout(() => { if (el) el.innerHTML = ''; }, 4000);
+  if (result.success) {
+    setTimeout(() => { if (el) el.innerHTML = ''; }, 6000);
+  }
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
