@@ -849,7 +849,7 @@ function findBestMatch(queryHash, fingerprints) {
 
 // Max Hamming distance to accept a match (out of 64 bits).
 // La valeur de 15 est moins permissive grâce au recadrage précis sur le cadre carte.
-const MATCH_THRESHOLD = 15;
+const MATCH_THRESHOLD = 12;
 
 let _scanState = { scanning: false };
 
