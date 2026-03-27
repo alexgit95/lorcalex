@@ -1031,6 +1031,21 @@ function toggleContinuousScan() {
   }
 }
 
+function setScannerCameraVisible(visible) {
+  const cameraArea = document.getElementById('scanCameraArea');
+  if (!cameraArea) return;
+  cameraArea.style.display = visible ? '' : 'none';
+}
+
+function restartScannerCapture() {
+  setScannerCameraVisible(true);
+  setScanAlert('');
+  setScanDebug([]);
+  const area = document.getElementById('foundCardsArea');
+  if (area) area.innerHTML = '';
+  startContinuousScan();
+}
+
 function renderScanner() {
   document.getElementById('app').innerHTML = `
     <div class="app">
@@ -1227,6 +1242,11 @@ async function handleCapture(mode, options = {}) {
       const filtered = cards.filter(c => c.editionSetNumber === parsed.setNum);
       if (filtered.length > 0) matchedCards = filtered;
     }
+    if (mode === 'camera') {
+      setScannerCameraVisible(false);
+      setScanAlert('');
+      setScanDebug([]);
+    }
     await handleFoundCards(matchedCards, parsed.cardNum);
     return true;
   } catch (e) {
@@ -1280,6 +1300,7 @@ async function autoAddCard(card) {
   setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity})`, 'success');
   playBeep(880, 200);
   navigator.vibrate?.([100, 50, 100]);
+  return updated;
 }
 
 // Affiche la carte trouvée avec une image et un bouton de confirmation avant ajout.
@@ -1287,12 +1308,12 @@ function renderCardConfirmation(card) {
   const area = document.getElementById('foundCardsArea');
   if (!area) return;
   setScanAlert('');
+  setScanDebug([]);
   const imgHtml = card.imageUrl
     ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)" onerror="this.style.display='none'" />`
     : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem">🃏</div>`;
-  const alreadyOwned = card.owned
-    ? `<div style="font-size:.78rem;color:var(--success);margin-top:6px">✓ Déjà en collection (×${card.quantity})</div>`
-    : '';
+  const ownedQty = card.owned ? card.quantity : 0;
+  const ownedInfo = `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px">En collection : <strong style="color:var(--text)">×${ownedQty}</strong></div>`;
   area.innerHTML = `
     <div style="padding:12px">
       <h3 style="font-size:.85rem;color:var(--text-muted);text-align:center;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Carte identifiée — confirmer ?</h3>
@@ -1302,27 +1323,26 @@ function renderCardConfirmation(card) {
           <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
           <div style="font-size:.78rem;color:var(--primary-light);font-weight:700;margin-top:4px">${esc(card.editionCode)}</div>
           <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">#${esc(String(card.cardNumber))} · ${esc(card.rarity)}</div>
-          ${alreadyOwned}
+          ${ownedInfo}
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:16px">
         <button class="btn btn-accent btn-full" id="confirmAddBtn">${card.owned ? '+ Ajouter un exemplaire' : '✓ Ajouter à la collection'}</button>
-        <button class="btn btn-ghost" id="cancelConfirmBtn" style="flex-shrink:0;padding:0 14px">✕</button>
+        <button class="btn btn-ghost" id="restartScanBtn" style="flex-shrink:0;padding:0 14px">↻ Recommencer</button>
       </div>
     </div>`;
   document.getElementById('confirmAddBtn').addEventListener('click', async () => {
-    area.innerHTML = '';
-    await autoAddCard(card);
+    const updated = await autoAddCard(card);
+    if (updated) renderCardConfirmation(updated);
   });
-  document.getElementById('cancelConfirmBtn').addEventListener('click', () => {
-    area.innerHTML = '';
-    setScanAlert('Annulé.', 'info');
-  });
+  document.getElementById('restartScanBtn').addEventListener('click', restartScannerCapture);
 }
 
 function renderFoundCards(cards) {
   const area = document.getElementById('foundCardsArea');
   if (!area) return;
+  setScanAlert('');
+  setScanDebug([]);
   area.innerHTML = `<div style="padding:0 12px">
     <h3 style="font-size:.9rem;margin-bottom:10px">Plusieurs cartes trouvées — choisissez :</h3>
     ${cards.map(c => `
@@ -1333,6 +1353,7 @@ function renderFoundCards(cards) {
           <div style="font-size:.75rem;color:var(--text-muted)">${esc(c.editionCode)} • ${esc(c.rarity)}</div>
         </div>
       </button>`).join('')}
+    <button class="btn btn-ghost btn-full" id="restartScanBtnList" style="margin-top:8px">↻ Recommencer</button>
   </div>`;
   area.querySelectorAll('[data-cardid]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1340,6 +1361,7 @@ function renderFoundCards(cards) {
       renderCardConfirmation(card);
     });
   });
+  document.getElementById('restartScanBtnList')?.addEventListener('click', restartScannerCapture);
 }
 
 function setScanAlert(msg, type = 'success') {
