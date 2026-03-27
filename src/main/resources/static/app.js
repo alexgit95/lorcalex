@@ -837,19 +837,29 @@ async function loadFingerprints() {
   return _fingerprintsCache;
 }
 
+// Retourne le meilleur candidat ET l'écart avec le 2ème (gap de confiance).
+// Si gap < MIN_CONFIDENCE_GAP, le résultat est rejeté comme ambigu.
 function findBestMatch(queryHash, fingerprints) {
-  let best = null;
-  let bestDist = Infinity;
+  let best = null, second = null;
+  let bestDist = Infinity, secondDist = Infinity;
   for (const fp of fingerprints) {
     const dist = hammingDistance(queryHash, hexToBigInt(fp.h));
-    if (dist < bestDist) { bestDist = dist; best = fp; }
+    if (dist < bestDist) {
+      second = best; secondDist = bestDist;
+      bestDist = dist; best = fp;
+    } else if (dist < secondDist) {
+      secondDist = dist; second = fp;
+    }
   }
-  return best ? { ...best, distance: bestDist } : null;
+  if (!best) return null;
+  const gap = secondDist - bestDist; // plus c'est grand, plus c'est confiant
+  return { ...best, distance: bestDist, gap, secondDist };
 }
 
-// Max Hamming distance to accept a match (out of 64 bits).
-// La valeur de 15 est moins permissive grâce au recadrage précis sur le cadre carte.
+// Seuil absolu : distance max acceptable (sur 64 bits).
 const MATCH_THRESHOLD = 12;
+// Écart minimal entre le 1er et le 2ème candidat (si gap < cette valeur → ambigu).
+const MIN_CONFIDENCE_GAP = 5;
 
 let _scanState = { scanning: false };
 
@@ -860,13 +870,14 @@ function renderScanner() {
         <div class="page-header"><h1>📷 Scanner</h1></div>
         <div id="scanCameraArea"></div>
         <div id="scanAlerts"></div>
-        <div style="padding:12px">
+        <div id="foundCardsArea"></div>
+        <div style="padding:12px;border-top:1px solid var(--border);margin-top:8px">
+          <p style="font-size:.75rem;color:var(--text-muted);margin:0 0 8px">Saisie manuelle</p>
           <div style="display:flex;gap:8px">
-            <input class="search-input" id="manualNum" type="number" placeholder="Numéro de carte manuel…" min="1" style="border-radius:8px" />
+            <input class="search-input" id="manualNum" type="number" placeholder="Numéro de carte…" min="1" style="border-radius:8px" />
             <button class="btn btn-ghost" id="manualLookupBtn" style="flex-shrink:0">Chercher</button>
           </div>
         </div>
-        <div id="foundCardsArea"></div>
       </div>
       ${navHTML('scanner')}
     </div>`;
@@ -928,20 +939,38 @@ async function handleCapture() {
 
     btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Analyse…`;
 
-    // Capture 3 frames consécutives et retient la meilleure correspondance
-    let bestMatch = null;
-    let bestDist  = Infinity;
+    // 3 frames : vote majoritaire + gap de confiance sur chaque frame
+    const votes = new Map(); // clé = fp.id → {count, bestM}
     for (let frame = 0; frame < 3; frame++) {
       if (frame > 0) await new Promise(r => setTimeout(r, 80));
       const cropped   = cropToCardFrame(video);
       const queryHash = computeAHash(cropped);
       const m = findBestMatch(queryHash, fingerprints);
-      if (m && m.distance < bestDist) { bestDist = m.distance; bestMatch = m; }
+      // On ne compte ce vote que si la frame est elle-même confiante
+      if (m && m.distance <= MATCH_THRESHOLD && m.gap >= MIN_CONFIDENCE_GAP) {
+        const key = m.id;
+        const prev = votes.get(key);
+        if (!prev || m.distance < prev.bestM.distance) {
+          votes.set(key, { count: (prev?.count ?? 0) + 1, bestM: m });
+        } else {
+          votes.set(key, { count: prev.count + 1, bestM: prev.bestM });
+        }
+      }
     }
-    const match = bestMatch;
+    // Cherche le candidat avec le plus de votes ; en cas d'égalité, la distance gagne
+    let match = null;
+    for (const { count, bestM } of votes.values()) {
+      if (!match ||
+          count > match._count ||
+          (count === match._count && bestM.distance < match.distance)) {
+        match = { ...bestM, _count: count };
+      }
+    }
 
-    if (!match || match.distance > MATCH_THRESHOLD) {
-      setScanAlert(`Carte non reconnue (score: ${match?.distance ?? '?'}/64). Essayez un meilleur éclairage ou la saisie manuelle.`, 'error');
+    // Rejeté si aucun vote ou si la carte n'a pas eu de majorité (≥ 2/3)
+    if (!match || match._count < 2) {
+      const hint = match ? ` (score: ${match.distance}/64, ${match._count}/3 frames)` : '';
+      setScanAlert(`Carte non reconnue${hint}. Tenez la carte bien immobile et éclairée, ou utilisez la saisie manuelle.`, 'error');
       return;
     }
 
