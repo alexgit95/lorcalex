@@ -794,7 +794,7 @@ function extractCodeZone(cardCanvas) {
   const zW = Math.round(sw * 0.55);
   const zH = Math.round(sh * 0.12);
   const zY = sh - zH;
-  const SCALE = 8;
+  const SCALE = 3;
   const out = document.createElement('canvas');
   out.width  = zW * SCALE;
   out.height = zH * SCALE;
@@ -873,35 +873,44 @@ function cloneCanvas(src) {
   return out;
 }
 
-// ── Tesseract worker (singleton) ──────────────────────────────────────────────
-let _tessWorker = null;
-let _tessWorkerLoading = null;
+// ── Tesseract worker (v5) ────────────────────────────────────────────────────
+// v5 corrige le bug WASM "SetImageFile, e is null" de la v4.
+// Un seul worker peut être réutilisé pour plusieurs recognize() consécutifs.
+async function createTessWorker() {
+  if (typeof Tesseract === 'undefined') {
+    throw new Error('Tesseract.js non chargé. Vérifiez votre connexion internet et rechargez la page.');
+  }
+  const w = await Tesseract.createWorker('eng');
+  return w;
+}
 
-// PSM 7 = traiter comme une unique ligne de texte.
-async function getTessWorker() {
-  if (_tessWorker) return _tessWorker;
-  if (_tessWorkerLoading) return _tessWorkerLoading;
-  _tessWorkerLoading = (async () => {
-    if (typeof Tesseract === 'undefined') {
-      throw new Error('Tesseract.js non chargé. Vérifiez votre connexion internet et rechargez la page.');
-    }
-    const w = await Tesseract.createWorker('eng');
-    try {
-      await w.setParameters({
-        tessedit_pageseg_mode: '7',
-        tessedit_char_whitelist: '0123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZ \u2022\u00b7.-',
-        tessjs_create_hocr: '0',
-        tessjs_create_tsv:  '0',
-      });
-    } catch (paramErr) {
-      // setParameters peut échouer sur certaines versions WASM — on continue sans whitelist.
-      console.warn('[Scanner] setParameters ignoré :', paramErr.message);
-    }
-    _tessWorker = w;
-    _tessWorkerLoading = null;
-    return w;
-  })();
-  return _tessWorkerLoading;
+// Convertit un canvas en Blob PNG (format fiable pour le transfert vers le Web Worker Tesseract).
+function canvasToBlob(canvas) {
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
+// ⚠️ Charge l'image sélectionnée via le sélecteur de fichier et la dessine sur un canvas.
+async function loadFileCanvas() {
+  const input = document.getElementById('scanImageFile');
+  const file = input?.files?.[0];
+  if (!file) throw new Error('Sélectionnez d\'abord une image via le bouton "Choisir une image".');
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width  = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0);
+        resolve(c);
+      };
+      img.onerror = () => reject(new Error('Impossible de décoder l\'image sélectionnée.'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Impossible de lire le fichier sélectionné.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── Parsing du code Lorcana ───────────────────────────────────────────────────
@@ -984,18 +993,51 @@ function renderScanner() {
             </div>
           </div>
         </div>
-        <div style="padding:14px 12px">
-          <button class="btn btn-accent btn-full" id="captureBtn">📷 Identifier la carte</button>
-          <p style="text-align:center;font-size:.75rem;color:var(--text-muted);margin-top:8px">
-            Cadrez la <strong>carte entière</strong> — le code bas-gauche (ex&nbsp;: 1/204&nbsp;•&nbsp;FR&nbsp;•&nbsp;4) doit être net.
-          </p>
+        <div style="padding:14px 12px;display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-accent btn-full" id="captureBtn">📸 Scanner depuis la caméra</button>
+          <div style="display:flex;align-items:center;gap:10px;margin:4px 0">
+            <hr style="flex:1;border:none;border-top:1px solid var(--border)" />
+            <span style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">ou</span>
+            <hr style="flex:1;border:none;border-top:1px solid var(--border)" />
+          </div>
+          <label class="btn btn-ghost btn-full" style="cursor:pointer">
+            🖼️ Choisir une image
+            <input type="file" id="scanImageFile" accept="image/*" style="display:none" />
+          </label>
+          <p id="scanImageName" style="text-align:center;font-size:.72rem;color:var(--text-muted);margin:0">Aucune image sélectionnée</p>
+          <button class="btn btn-ghost btn-full" id="scanImageBtn" disabled>🔍 Lancer l'OCR sur l'image</button>
         </div>`;
       document.getElementById('scanVideo').srcObject = stream;
-      document.getElementById('captureBtn').addEventListener('click', handleCapture);
-      getTessWorker().catch(e => console.warn('[Scanner] pré-chargement Tesseract :', e.message));
+      document.getElementById('captureBtn').addEventListener('click', () => handleCapture('camera'));
+      document.getElementById('scanImageBtn').addEventListener('click', () => handleCapture('file'));
+      document.getElementById('scanImageFile').addEventListener('change', e => {
+        const f = e.target.files?.[0];
+        const nameEl = document.getElementById('scanImageName');
+        const imgBtn = document.getElementById('scanImageBtn');
+        if (nameEl) nameEl.textContent = f ? `✔ ${f.name}` : 'Aucune image sélectionnée';
+        if (imgBtn) imgBtn.disabled = !f;
+      });
     })
     .catch(err => {
-      cameraArea.innerHTML = `<div class="alert alert-warning" style="margin:12px">Caméra indisponible (${esc(err.message)}) — utilisez la saisie manuelle ci-dessous.</div>`;
+      // Caméra indisponible : proposer uniquement le mode fichier
+      cameraArea.innerHTML = `
+        <div class="alert alert-warning" style="margin:12px">Caméra indisponible (${esc(err.message)})</div>
+        <div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:8px">
+          <label class="btn btn-ghost btn-full" style="cursor:pointer">
+            🖼️ Choisir une image
+            <input type="file" id="scanImageFile" accept="image/*" style="display:none" />
+          </label>
+          <p id="scanImageName" style="text-align:center;font-size:.72rem;color:var(--text-muted);margin:0">Aucune image sélectionnée</p>
+          <button class="btn btn-accent btn-full" id="scanImageBtn" disabled>🔍 Lancer l'OCR sur l'image</button>
+        </div>`;
+      document.getElementById('scanImageBtn').addEventListener('click', () => handleCapture('file'));
+      document.getElementById('scanImageFile').addEventListener('change', e => {
+        const f = e.target.files?.[0];
+        const nameEl = document.getElementById('scanImageName');
+        const imgBtn = document.getElementById('scanImageBtn');
+        if (nameEl) nameEl.textContent = f ? `✔ ${f.name}` : 'Aucune image sélectionnée';
+        if (imgBtn) imgBtn.disabled = !f;
+      });
     });
 
   document.getElementById('manualLookupBtn').addEventListener('click', handleManualLookup);
@@ -1003,35 +1045,39 @@ function renderScanner() {
   document.getElementById('manualSet').addEventListener('keydown', e => { if (e.key === 'Enter') handleManualLookup(); });
 }
 
-async function handleCapture() {
+async function handleCapture(mode) {
   if (_scanState.scanning) return;
-  const video = document.getElementById('scanVideo');
-  if (!video || !video.videoWidth) {
-    setScanAlert('Caméra pas encore prête, veuillez patienter.', 'warning');
-    return;
-  }
   _scanState.scanning = true;
   setScanAlert('');
   setScanDebug([]);
   document.getElementById('foundCardsArea').innerHTML = '';
-  const btn = document.getElementById('captureBtn');
-  btn.disabled = true;
+
+  // Désactiver les deux boutons pendant le scan
+  const camBtn = document.getElementById('captureBtn');
+  const imgBtn = document.getElementById('scanImageBtn');
+  if (camBtn) camBtn.disabled = true;
+  if (imgBtn) imgBtn.disabled = true;
+  const activeBtn = mode === 'camera' ? camBtn : imgBtn;
 
   try {
-    // Étape 1 — Initialisation Tesseract
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Chargement OCR…`;
-    const worker = await getTessWorker();
+    // Étape 1 — Acquisition de l'image (caméra ou fichier)
+    if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Capture…`;
+    let cardCanvas;
+    let sourceLabel;
+    if (mode === 'camera') {
+      const video = document.getElementById('scanVideo');
+      if (!video || !video.videoWidth) throw new Error('Flux vidéo indisponible. Vérifiez que la caméra est active.');
+      cardCanvas = cropToCardFrame(video);
+      sourceLabel = `📸 Caméra (${cardCanvas.width}×${cardCanvas.height} px)`;
+    } else {
+      cardCanvas = await loadFileCanvas();
+      const fileName = document.getElementById('scanImageFile')?.files?.[0]?.name ?? 'image';
+      sourceLabel = `🖼️ ${fileName} (${cardCanvas.width}×${cardCanvas.height} px)`;
+    }
 
-    // Étape 2 — Capture + extraction de la zone code bas-gauche
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Capture…`;
-    const cardCanvas = cropToCardFrame(video);
-    const zoneRaw    = extractCodeZone(cardCanvas);
+    const zoneRaw = extractCodeZone(cardCanvas);
 
-    // Étape 3 — 4 variantes de prétraitement pour maximiser la détection
-    // A : image naturelle (upscalée)
-    // B : inversée (texte clair sur fond sombre)
-    // C : niveaux de gris + binarisation Otsu
-    // D : Otsu inversé
+    // Étape 2 — 4 variantes de prétraitement pour maximiser la détection
     const canvC = otsuThreshold(toGrayscale(cloneCanvas(zoneRaw)));
     const variants = [
       { label: 'naturel',      canvas: zoneRaw },
@@ -1040,28 +1086,35 @@ async function handleCapture() {
       { label: 'Otsu+inversé', canvas: invertCanvas(cloneCanvas(canvC)) },
     ];
 
-    // Étape 4 — OCR sur chaque variante
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Lecture OCR…`;
+    // Étape 3 — OCR : un seul worker v5 pour toutes les variantes
+    if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Initialisation OCR…`;
+    const worker = await createTessWorker();
     const debugLines = [
-      `Zone : ${zoneRaw.width}×${zoneRaw.height} px  (carte ${cardCanvas.width}×${cardCanvas.height})`,
+      sourceLabel,
+      `Zone extraite : ${zoneRaw.width}×${zoneRaw.height} px`,
     ];
     let parsed = null;
-    for (const { label, canvas } of variants) {
-      let result;
-      try {
-        result = await worker.recognize(canvas);
-      } catch (ocrErr) {
-        debugLines.push(`[${label}] ❌ Erreur Tesseract : ${ocrErr.message}`);
-        continue;
+    try {
+      for (const { label, canvas } of variants) {
+        if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> OCR [${label}]…`;
+        try {
+          const blob = await canvasToBlob(canvas);
+          const result = await worker.recognize(blob);
+          const raw  = result.data.text.trim().replace(/\n/g, ' ');
+          const conf = Math.round(result.data.confidence);
+          const p    = parseCardCode(raw);
+          const info = p
+            ? `✔ #${p.cardNum}/${p.total}  lang=${p.lang ?? '?'}  set=${p.setNum ?? '?'}`
+            : '✘ non reconnu';
+          debugLines.push(`[${label}] conf=${conf}%   "${raw}"   →   ${info}`);
+          if (!parsed && p) parsed = p;
+        } catch (ocrErr) {
+          const errMsg = ocrErr instanceof Error ? ocrErr.message : String(ocrErr ?? 'erreur inconnue');
+          debugLines.push(`[${label}] ❌ Erreur Tesseract : ${errMsg}`);
+        }
       }
-      const raw  = result.data.text.trim().replace(/\n/g, ' ');
-      const conf = Math.round(result.data.confidence);
-      const p    = parseCardCode(raw);
-      const info = p
-        ? `✔ #${p.cardNum}/${p.total}  lang=${p.lang ?? '?'}  set=${p.setNum ?? '?'}`
-        : '✘ non reconnu';
-      debugLines.push(`[${label}] conf=${conf}%   "${raw}"   →   ${info}`);
-      if (!parsed && p) parsed = p;
+    } finally {
+      try { await worker.terminate(); } catch { /* ignore */ }
     }
 
     // Panneau debug toujours affiché pour faciliter le diagnostic
@@ -1075,8 +1128,8 @@ async function handleCapture() {
       return;
     }
 
-    // Étape 5 — Recherche de la carte en base
-    btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Recherche carte #${parsed.cardNum}…`;
+    // Étape 4 — Recherche de la carte en base
+    if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Recherche carte #${parsed.cardNum}…`;
     const cards = await api.lookupCard(parsed.cardNum, undefined);
     if (cards.length === 0) {
       setScanAlert(`Aucune carte #${parsed.cardNum} en base. Importez d'abord le catalogue via Administration.`, 'error');
@@ -1094,8 +1147,9 @@ async function handleCapture() {
     console.error('[Scanner] handleCapture :', e);
   } finally {
     _scanState.scanning = false;
-    const b = document.getElementById('captureBtn');
-    if (b) { b.disabled = false; b.textContent = '📷 Identifier la carte'; }
+    if (camBtn) { camBtn.disabled = false; camBtn.textContent = '📸 Scanner depuis la caméra'; }
+    const fileInput = document.getElementById('scanImageFile');
+    if (imgBtn) { imgBtn.disabled = !fileInput?.files?.[0]; imgBtn.textContent = '🔍 Lancer l\'OCR sur l\'image'; }
   }
 }
 
