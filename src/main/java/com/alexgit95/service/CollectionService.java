@@ -28,7 +28,7 @@ public class CollectionService {
     }
 
     @Transactional
-    public CardDTO addCard(Long cardId, int quantity) {
+    public CardDTO addCard(Long cardId, int quantity, boolean foil) {
         Card card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found: " + cardId));
 
@@ -37,17 +37,19 @@ public class CollectionService {
         if (existing.isPresent()) {
             uc = existing.get();
             uc.setQuantity(uc.getQuantity() + quantity);
+            uc.setFoil(foil);
         } else {
             uc = new UserCollection();
             uc.setCard(card);
             uc.setQuantity(quantity);
+            uc.setFoil(foil);
         }
         collectionRepository.save(uc);
         return cardService.toDTO(card, uc);
     }
 
     @Transactional
-    public CardDTO updateQuantity(Long cardId, int quantity) {
+    public CardDTO updateQuantity(Long cardId, int quantity, Boolean foil) {
         if (quantity <= 0) {
             return removeCard(cardId);
         }
@@ -60,6 +62,9 @@ public class CollectionService {
                     return newUc;
                 });
         uc.setQuantity(quantity);
+        if (foil != null) {
+            uc.setFoil(foil);
+        }
         collectionRepository.save(uc);
         return cardService.toDTO(card, uc);
     }

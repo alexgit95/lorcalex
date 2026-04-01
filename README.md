@@ -304,11 +304,56 @@ Accessible depuis **Administration → Import depuis Lorcana Companion**.
 - Migration Tesseract.js v4 → v5 pour corriger les erreurs WASM (`SetImageFile, e is null`).
 - Passage d'un scan ponctuel manuel à un flux continu optimisé mobile.
 
+---
+
+## Changelog
+
+### 2026-04-01 — Cartes foil, dates d'ajout
+
+#### Nouvelles fonctionnalités
+
+| Fonctionnalité | Description |
+|---|---|
+| **Version foil** | Chaque carte de la collection peut être marquée comme foil. |
+| **Badge Foil** | Les cartes foil affichent un badge doré ✦ dans la grille de la collection et une bordure mise en valeur. |
+| **Toggle foil dans le détail** | En ouvrant une carte possédée, un bouton **◇ Normal / ✦ Foil** permet de basculer la version d'un seul tap. |
+| **Choix foil à l'ajout** | Lors de l'ajout d'une carte (modale manuelle, scanner), une case à cocher "Foil" est proposée avant confirmation. |
+| **Date de premier ajout** | La date à laquelle une carte a été ajoutée pour la première fois en collection est mémorisée (`firstAddedAt`). |
+| **Date de dernière modification** | La date de la dernière mise à jour de la quantité ou du statut foil est mémorisée (`lastAddedAt`). |
+| **Affichage des dates** | Les deux dates sont visibles dans la vue de détail d'une carte possédée. |
+
+#### Modifications techniques
+
+- `UserCollection` : champs `foil` (boolean, défaut `false`), `firstAddedAt`, `lastAddedAt` (ex-`addedAt`). `@PrePersist` utilise des **null-checks** pour ne pas écraser les dates pré-initialisées (scénario de restauration). `@PreUpdate` maintient `lastAddedAt` automatiquement.
+- `CardDTO` : champs `foil`, `firstAddedAt`, `lastAddedAt` exposés dans tous les endpoints collection.
+- `POST /api/collection` : accepte `foil` dans le body.
+- `PUT /api/collection/{cardId}` : accepte `foil` en option dans le body (`null` = conserve la valeur existante).
+- **Sauvegarde complète** : `foil`, `firstAddedAt`, `lastAddedAt` inclus dans le JSON exporté.
+- **Restauration complète** : `foil`, `firstAddedAt` et `lastAddedAt` lus depuis le backup et injectés avant persist, préservant ainsi les dates d'origine. Si les champs sont absents (backup ancien format), `@PrePersist` les remplit avec `now()`.
+- **Import Companion** : le format Companion additionne Regular + Foil en une seule quantité sans distinguer la version ; le champ `foil` reste à `false` pour les nouvelles entrées et conservé pour les entrées existantes en mode fusion.
+
+#### Corrections
+
+| Problème | Correction |
+|---|---|
+| `@PrePersist` écrasait `firstAddedAt`/`lastAddedAt` sur une restauration | `@PrePersist` utilise désormais `if (field == null)` avant d'attribuer `now()` |
+| La restauration ne lisait pas `firstAddedAt`/`lastAddedAt` depuis le backup | `fullRestore()` parse et injecte ces deux champs via `LocalDateTime.parse()` si présents |
+
+#### Tests ajoutés (`src/test/`)
+
+| Classe | Type | Couverture |
+|---|---|---|
+| `model/UserCollectionAuditTest` | `@DataJpaTest` (H2) | `@PrePersist` initialise les dates ; null-check préserve les dates preset ; `@PreUpdate` met à jour `lastAddedAt` sans toucher `firstAddedAt` ; valeurs foil persistées et modifiables |
+| `service/CollectionServiceTest` | Unitaire Mockito | `addCard` et `updateQuantity` — foil transmis, incrémentation de quantité, foil null = valeur inchangée, quantité ≤ 0 = suppression |
+| `controller/BackupRestoreIntegrationTest` | `@SpringBootTest` (H2) + MockMvc | Backup exporte `foil`/`firstAddedAt`/`lastAddedAt` ; restore les relit ; backup ancien format (sans dates) → fallback `now()` ; endpoints `POST /api/collection` et `PUT /api/collection/{id}` — foil stocké et `firstAddedAt` préservé au toggle |
+
+---
 
 ## Sécurité
 
 - JWT stateless (HS256), BCrypt pour les mots de passe.
 - **Changer `APP_PASSWORD` et `JWT_SECRET` en production.**
+
 
 
 

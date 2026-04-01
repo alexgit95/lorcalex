@@ -28,7 +28,8 @@ public class CollectionController {
         Long cardId = Long.parseLong(String.valueOf(body.get("cardId")));
         int quantity = body.containsKey("quantity")
                 ? Integer.parseInt(String.valueOf(body.get("quantity"))) : 1;
-        return ResponseEntity.ok(collectionService.addCard(cardId, quantity));
+        boolean foil = body.containsKey("foil") && Boolean.parseBoolean(String.valueOf(body.get("foil")));
+        return ResponseEntity.ok(collectionService.addCard(cardId, quantity, foil));
     }
 
     @PutMapping("/{cardId}")
@@ -36,7 +37,8 @@ public class CollectionController {
             @PathVariable Long cardId,
             @RequestBody Map<String, Object> body) {
         int quantity = Integer.parseInt(String.valueOf(body.get("quantity")));
-        return ResponseEntity.ok(collectionService.updateQuantity(cardId, quantity));
+        Boolean foil = body.containsKey("foil") ? Boolean.parseBoolean(String.valueOf(body.get("foil"))) : null;
+        return ResponseEntity.ok(collectionService.updateQuantity(cardId, quantity, foil));
     }
 
     @DeleteMapping("/{cardId}")

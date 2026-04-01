@@ -55,11 +55,13 @@ const api = {
 
   getFingerprints: () => apiFetch('/cards/fingerprints'),
 
-  addToCollection: (cardId, quantity = 1) =>
-    apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity }) }),
+  addToCollection: (cardId, quantity = 1, foil = false) =>
+    apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity, foil }) }),
 
-  updateQuantity: (cardId, quantity) =>
-    apiFetch(`/collection/${cardId}`, { method: 'PUT', body: JSON.stringify({ quantity }) }),
+  updateQuantity: (cardId, quantity, foil = undefined) =>
+    apiFetch(`/collection/${cardId}`, { method: 'PUT', body: JSON.stringify(
+      foil !== undefined ? { quantity, foil } : { quantity }
+    ) }),
 
   removeFromCollection: (cardId) =>
     apiFetch(`/collection/${cardId}`, { method: 'DELETE' }),
@@ -197,6 +199,12 @@ function esc(str) {
 
 function loadingHTML(label = 'Chargement...') {
   return `<div class="loading-center"><div class="spinner"></div><span>${label}</span></div>`;
+}
+
+function formatDate(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
@@ -393,10 +401,11 @@ function renderCards() {
 function cardItemHTML(card) {
   const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
   const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
-  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}" data-id="${card.id}">
+  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${card.foil ? ' foil' : ''}" data-id="${card.id}">
     ${card.imageUrl
       ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    ${card.foil ? `<div class="foil-badge">✦ Foil</div>` : ''}
     ${card.owned ? `<div class="owned-badge">${card.quantity > 1 ? card.quantity : '✓'}</div>` : ''}
     <div class="card-info">
       <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
@@ -433,15 +442,37 @@ function openModal(cardId) {
 
           <div class="modal-qty-section">
             ${card.owned
-              ? `<div style="display:flex;align-items:center;justify-content:space-between">
-                  <span style="font-size:.9rem;color:var(--text-muted)">En collection</span>
-                  <div class="qty-control">
-                    <button class="qty-btn" id="qtyMinus">−</button>
-                    <span class="qty-value" id="qtyVal">${card.quantity}</span>
-                    <button class="qty-btn" id="qtyPlus">＋</button>
+              ? `<div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                    <span style="font-size:.9rem;color:var(--text-muted)">En collection</span>
+                    <div class="qty-control">
+                      <button class="qty-btn" id="qtyMinus">−</button>
+                      <span class="qty-value" id="qtyVal">${card.quantity}</span>
+                      <button class="qty-btn" id="qtyPlus">＋</button>
+                    </div>
                   </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <span style="font-size:.85rem;color:var(--text-muted)">Version</span>
+                    <button id="foilToggleBtn" class="btn btn-ghost${card.foil ? ' foil-toggle-active' : ''}" style="padding:4px 14px;font-size:.8rem;gap:4px">
+                      ${card.foil ? '✦ Foil' : '◇ Normal'}
+                    </button>
+                  </div>
+                  ${(card.firstAddedAt || card.lastAddedAt) ? `
+                  <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px;line-height:1.6">
+                    ${card.firstAddedAt ? `<div>Ajoutée le : <strong style="color:var(--text)">${formatDate(card.firstAddedAt)}</strong></div>` : ''}
+                    ${card.lastAddedAt && card.lastAddedAt !== card.firstAddedAt ? `<div>Dernière modif. : <strong style="color:var(--text)">${formatDate(card.lastAddedAt)}</strong></div>` : ''}
+                  </div>` : ''}
                 </div>`
-              : `<button class="btn btn-accent btn-full" id="addCardBtn">+ Ajouter à la collection</button>`}
+              : `<div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                    <span style="font-size:.85rem;color:var(--text-muted)">Version foil ?</span>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem">
+                      <input type="checkbox" id="addFoilCheck" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
+                      <span>Foil</span>
+                    </label>
+                  </div>
+                  <button class="btn btn-accent btn-full" id="addCardBtn">+ Ajouter à la collection</button>
+                </div>`}
           </div>
         </div>
       </div>
@@ -456,8 +487,12 @@ function openModal(cardId) {
   if (card.owned) {
     document.getElementById('qtyMinus').addEventListener('click', () => updateQty(card.id, card.quantity - 1));
     document.getElementById('qtyPlus').addEventListener('click', () => updateQty(card.id, card.quantity + 1));
+    document.getElementById('foilToggleBtn').addEventListener('click', () => toggleFoil(card.id));
   } else {
-    document.getElementById('addCardBtn').addEventListener('click', () => addCard(card.id));
+    document.getElementById('addCardBtn').addEventListener('click', () => {
+      const foil = document.getElementById('addFoilCheck')?.checked ?? false;
+      addCard(card.id, foil);
+    });
   }
 }
 
@@ -541,7 +576,12 @@ async function doAddSearch(query) {
                 <span class="qty-value">${c.quantity}</span>
                 <button class="qty-btn" data-action="plus" data-id="${c.id}" data-qty="${c.quantity}">＋</button>
                </div>`
-            : `<button class="btn btn-accent" style="flex-shrink:0;padding:8px 14px;font-size:.85rem" data-action="add" data-id="${c.id}">+ Ajouter</button>`}
+            : `<div class="add-action-container" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--text-muted)">
+                  <input type="checkbox" class="foil-check" data-id="${c.id}" style="accent-color:var(--accent)"> Foil
+                </label>
+                <button class="btn btn-accent" style="padding:6px 14px;font-size:.85rem" data-action="add" data-id="${c.id}">+ Ajouter</button>
+               </div>`}
         </div>`).join('')}
     </div>`;
 
@@ -552,7 +592,9 @@ async function doAddSearch(query) {
       const action = btn.dataset.action;
       let updated;
       if (action === 'add') {
-        updated = await api.addToCollection(cardId, 1);
+        const foilCheck = area.querySelector(`.foil-check[data-id="${cardId}"]`);
+        const foil = foilCheck ? foilCheck.checked : false;
+        updated = await api.addToCollection(cardId, 1, foil);
       } else if (action === 'plus') {
         updated = await api.updateQuantity(cardId, parseInt(btn.dataset.qty) + 1);
       } else if (action === 'minus') {
@@ -567,19 +609,24 @@ async function doAddSearch(query) {
       area.querySelectorAll('.add-result-row').forEach(row => {
         if (parseInt(row.dataset.id) !== updated.id) return;
         const qtyControl = row.querySelector('.qty-control');
-        const addBtn = row.querySelector('[data-action="add"]');
+        const addContainer = row.querySelector('.add-action-container');
         if (updated.owned) {
           const ctrl = `<div class="qty-control" style="flex-shrink:0">
             <button class="qty-btn" data-action="minus" data-id="${updated.id}" data-qty="${updated.quantity}">−</button>
             <span class="qty-value">${updated.quantity}</span>
             <button class="qty-btn" data-action="plus" data-id="${updated.id}" data-qty="${updated.quantity}">＋</button>
           </div>`;
-          if (qtyControl) qtyControl.outerHTML = ctrl;
-          else if (addBtn) addBtn.outerHTML = ctrl;
+          const target = qtyControl || addContainer;
+          if (target) target.outerHTML = ctrl;
         } else {
-          const ab = `<button class="btn btn-accent" style="flex-shrink:0;padding:8px 14px;font-size:.85rem" data-action="add" data-id="${updated.id}">+ Ajouter</button>`;
-          if (addBtn) addBtn.outerHTML = ab;
-          else if (qtyControl) qtyControl.outerHTML = ab;
+          const ab = `<div class="add-action-container" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--text-muted)">
+              <input type="checkbox" class="foil-check" data-id="${updated.id}" style="accent-color:var(--accent)"> Foil
+            </label>
+            <button class="btn btn-accent" style="padding:6px 14px;font-size:.85rem" data-action="add" data-id="${updated.id}">+ Ajouter</button>
+          </div>`;
+          const target = addContainer || qtyControl;
+          if (target) target.outerHTML = ab;
         }
       });
     });
@@ -588,8 +635,8 @@ async function doAddSearch(query) {
   }
 }
 
-async function addCard(cardId) {
-  const updated = await api.addToCollection(cardId, 1);
+async function addCard(cardId, foil = false) {
+  const updated = await api.addToCollection(cardId, 1, foil);
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
@@ -603,6 +650,16 @@ async function updateQty(cardId, qty) {
   } else {
     updated = await api.updateQuantity(cardId, qty);
   }
+  collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  collState.modal = updated;
+  renderCards();
+  openModal(cardId);
+}
+
+async function toggleFoil(cardId) {
+  const card = collState.cards.find(c => c.id === cardId);
+  if (!card) return;
+  const updated = await api.updateQuantity(cardId, card.quantity, !card.foil);
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
@@ -1237,8 +1294,8 @@ async function handleFoundCards(cards, num) {
   }
 }
 
-async function autoAddCard(card) {
-  const updated = await api.addToCollection(card.id, 1);
+async function autoAddCard(card, foil = false) {
+  const updated = await api.addToCollection(card.id, 1, foil);
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity})`, 'success');
   playBeep(880, 200);
@@ -1276,13 +1333,20 @@ function renderCardConfirmation(card) {
           ${ownedInfo}
         </div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:16px">
-        <button class="btn btn-accent btn-full" id="confirmAddBtn">${card.owned ? '+ Ajouter un exemplaire' : '✓ Ajouter à la collection'}</button>
-        <button class="btn btn-ghost" id="restartScanBtn" style="flex-shrink:0;padding:0 14px">↻ Recommencer</button>
+      <div style="display:flex;gap:8px;margin-top:16px;flex-direction:column">
+        <label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-size:.85rem;color:var(--text-muted)">
+          <input type="checkbox" id="scanFoilCheck" style="accent-color:var(--accent);width:16px;height:16px">
+          Version foil
+        </label>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-accent btn-full" id="confirmAddBtn">${card.owned ? '+ Ajouter un exemplaire' : '✓ Ajouter à la collection'}</button>
+          <button class="btn btn-ghost" id="restartScanBtn" style="flex-shrink:0;padding:0 14px">↻ Recommencer</button>
+        </div>
       </div>
     </div>`;
   document.getElementById('confirmAddBtn').addEventListener('click', async () => {
-    await autoAddCard(card);
+    const foil = document.getElementById('scanFoilCheck')?.checked ?? false;
+    await autoAddCard(card, foil);
     restartScannerCapture();
   });
   document.getElementById('restartScanBtn').addEventListener('click', restartScannerCapture);

@@ -157,6 +157,32 @@ body {
 .rarity-Legendary { color: #fff176; }
 .rarity-Enchanted { color: #f48fb1; }
 
+/* Foil cards */
+.card-item.foil {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(253, 216, 53, 0.35);
+}
+
+.foil-badge {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  background: linear-gradient(135deg, #fdd835, #ff8f00, #fdd835);
+  color: #1a1a1a;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 0.55rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+}
+
+.foil-toggle-active {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
 /* Bottom navigation */
 .bottom-nav {
   position: fixed;

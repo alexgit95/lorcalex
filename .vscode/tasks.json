@@ -1,0 +1,25 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Maven Test",
+			"type": "shell",
+			"command": "mvnw.cmd test",
+			"isBackground": false,
+			"problemMatcher": [
+				"$java"
+			],
+			"group": "test"
+		},
+		{
+			"label": "Maven Test (cmd)",
+			"type": "shell",
+			"command": "cmd /c mvnw.cmd test -q 2>&1",
+			"isBackground": false,
+			"problemMatcher": [
+				"$java"
+			],
+			"group": "test"
+		}
+	]
+}

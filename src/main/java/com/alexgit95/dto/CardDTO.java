@@ -24,4 +24,7 @@ public class CardDTO {
     // Collection info (null if not fetched with collection context)
     private Boolean owned;
     private Integer quantity;
+    private Boolean foil;
+    private java.time.LocalDateTime firstAddedAt;
+    private java.time.LocalDateTime lastAddedAt;
 }

@@ -355,6 +355,9 @@ public class LorcaJsonService {
                 int incomingQty = entry.getValue();
                 int newQty = mergeMode ? (uc.getId() == null ? incomingQty : uc.getQuantity() + incomingQty) : incomingQty;
                 uc.setQuantity(newQty);
+                // Companion format sums all card variants (Regular + Foiled) into one quantity.
+                // Foil status cannot be determined from Companion export; it stays at its current value
+                // (false for new entries, preserved for existing ones in merge mode).
                 userCollectionRepository.save(uc);
                 imported++;
             }
