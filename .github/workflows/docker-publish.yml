@@ -63,7 +63,7 @@ jobs:
 
       - name: Compute branch tag
         id: branch_tag
-        if: startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/master'
+        if: startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main'
         shell: bash
         run: |
           BRANCH_TAG=$(echo "${GITHUB_REF_NAME}" \
@@ -72,7 +72,7 @@ jobs:
           echo "value=$BRANCH_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build and push – branch (tag = branch name)
-        if: startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/master'
+        if: startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -80,8 +80,8 @@ jobs:
           platforms: linux/arm64
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/lorcalex:${{ steps.branch_tag.outputs.value }}
 
-      - name: Build and push – master (tag = latest)
-        if: github.ref == 'refs/heads/master'
+      - name: Build and push – main (tag = latest)
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v7
         with:
           context: .
