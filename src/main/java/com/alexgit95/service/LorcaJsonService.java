@@ -308,7 +308,9 @@ public class LorcaJsonService {
             throw new RuntimeException("Format Companion invalide : clé 'OwnedCardQuantitiesV2' absente.");
         }
 
-        Map<String, Integer> quantitiesByExternalId = new LinkedHashMap<>();
+        // Separate Regular and Foiled quantities
+        Map<String, Integer> regularQtiesByExternalId = new LinkedHashMap<>();
+        Map<String, Integer> foilQtiesByExternalId = new LinkedHashMap<>();
         int skippedInvalidRows = 0;
         for (Object raw : entries) {
             if (!(raw instanceof Map<?, ?> row)) {
@@ -317,6 +319,7 @@ public class LorcaJsonService {
             }
             Object idRaw = row.get("Id");
             Object quantityRaw = row.get("Quantity");
+            Object typeRaw = row.get("Type");
             if (!(idRaw instanceof Number) || !(quantityRaw instanceof Number)) {
                 skippedInvalidRows++;
                 continue;
@@ -326,38 +329,67 @@ public class LorcaJsonService {
             if (quantity <= 0) continue;
 
             String externalId = String.valueOf(((Number) idRaw).intValue());
-            quantitiesByExternalId.merge(externalId, quantity, Integer::sum);
+            String type = typeRaw != null ? typeRaw.toString() : "Regular";
+            
+            // Accumulate by type
+            if ("Foiled".equalsIgnoreCase(type)) {
+                foilQtiesByExternalId.merge(externalId, quantity, Integer::sum);
+            } else {
+                regularQtiesByExternalId.merge(externalId, quantity, Integer::sum);
+            }
         }
 
-        if (quantitiesByExternalId.isEmpty()) {
+        // Merge all external IDs (both Regular and Foiled)
+        Map<String, Integer> allExternalIds = new LinkedHashMap<>(regularQtiesByExternalId);
+        foilQtiesByExternalId.forEach((id, qty) -> allExternalIds.putIfAbsent(id, 0));
+
+        if (allExternalIds.isEmpty()) {
             throw new RuntimeException("Aucune carte exploitable trouvée dans 'OwnedCardQuantitiesV2'.");
         }
 
-        List<Card> matchedCards = cardRepository.findByExternalIdIn(quantitiesByExternalId.keySet());
+        List<Card> matchedCards = cardRepository.findByExternalIdIn(allExternalIds.keySet());
         Map<String, Card> cardsByExternalId = matchedCards.stream()
                 .collect(Collectors.toMap(Card::getExternalId, c -> c, (a, b) -> a));
 
-        int total = quantitiesByExternalId.size();
+        int total = allExternalIds.size();
         int processed = 0;
         int imported = 0;
         int skippedUnknown = 0;
         progress.set(new ProgressInfo("companion_import", 0, total,
                 "Import Companion (0/" + total + ")…", true, false));
 
-        for (Map.Entry<String, Integer> entry : quantitiesByExternalId.entrySet()) {
-            Card card = cardsByExternalId.get(entry.getKey());
+        for (String externalId : allExternalIds.keySet()) {
+            Card card = cardsByExternalId.get(externalId);
             if (card == null) {
                 skippedUnknown++;
             } else {
                 UserCollection uc = userCollectionRepository.findByCardId(card.getId())
                         .orElseGet(UserCollection::new);
                 uc.setCard(card);
-                int incomingQty = entry.getValue();
-                int newQty = mergeMode ? (uc.getId() == null ? incomingQty : uc.getQuantity() + incomingQty) : incomingQty;
-                uc.setQuantity(newQty);
-                // Companion format sums all card variants (Regular + Foiled) into one quantity.
-                // Foil status cannot be determined from Companion export; it stays at its current value
-                // (false for new entries, preserved for existing ones in merge mode).
+                
+                int incomingRegularQty = regularQtiesByExternalId.getOrDefault(externalId, 0);
+                int incomingFoilQty = foilQtiesByExternalId.getOrDefault(externalId, 0);
+                
+                // Calculate new quantities based on merge mode
+                int newRegularQty, newFoilQty;
+                if (mergeMode) {
+                    if (uc.getId() == null) {
+                        // New entry
+                        newRegularQty = incomingRegularQty;
+                        newFoilQty = incomingFoilQty;
+                    } else {
+                        // Existing entry: add to what's there
+                        newRegularQty = (uc.getQuantity() != null ? uc.getQuantity() : 0) + incomingRegularQty;
+                        newFoilQty = (uc.getFoilQuantity() != null ? uc.getFoilQuantity() : 0) + incomingFoilQty;
+                    }
+                } else {
+                    // Replace mode: completely replace with incoming quantities
+                    newRegularQty = incomingRegularQty;
+                    newFoilQty = incomingFoilQty;
+                }
+                
+                uc.setQuantity(newRegularQty);
+                uc.setFoilQuantity(newFoilQty);
                 userCollectionRepository.save(uc);
                 imported++;
             }

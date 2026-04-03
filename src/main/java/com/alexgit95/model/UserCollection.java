@@ -24,6 +24,9 @@ public class UserCollection {
     @Column(nullable = false)
     private Integer quantity = 1;
 
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private Integer foilQuantity = 0;
+
     @Column(nullable = false, columnDefinition = "boolean default false")
     private Boolean foil = false;
 

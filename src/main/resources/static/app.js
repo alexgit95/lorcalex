@@ -55,12 +55,12 @@ const api = {
 
   getFingerprints: () => apiFetch('/cards/fingerprints'),
 
-  addToCollection: (cardId, quantity = 1, foil = false) =>
-    apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity, foil }) }),
+  addToCollection: (cardId, quantity = 1, foilQuantity = 0) =>
+    apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity, foilQuantity }) }),
 
-  updateQuantity: (cardId, quantity, foil = undefined) =>
+  updateQuantity: (cardId, quantity, foilQuantity = undefined) =>
     apiFetch(`/collection/${cardId}`, { method: 'PUT', body: JSON.stringify(
-      foil !== undefined ? { quantity, foil } : { quantity }
+      foilQuantity !== undefined ? { quantity, foilQuantity } : { quantity }
     ) }),
 
   removeFromCollection: (cardId) =>
@@ -401,12 +401,14 @@ function renderCards() {
 function cardItemHTML(card) {
   const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
   const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
-  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${card.foil ? ' foil' : ''}" data-id="${card.id}">
+  const totalQty = (card.quantity || 0) + (card.foilQuantity || 0);
+  const hasFoil = card.foilQuantity && card.foilQuantity > 0;
+  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}" data-id="${card.id}">
     ${card.imageUrl
       ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
-    ${card.foil ? `<div class="foil-badge">✦ Foil</div>` : ''}
-    ${card.owned ? `<div class="owned-badge">${card.quantity > 1 ? card.quantity : '✓'}</div>` : ''}
+    ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
+    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : ''}
     <div class="card-info">
       <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
       <div class="card-name">${esc(card.name)}</div>
@@ -444,7 +446,7 @@ function openModal(cardId) {
             ${card.owned
               ? `<div>
                   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                    <span style="font-size:.9rem;color:var(--text-muted)">En collection</span>
+                    <span style="font-size:.9rem;color:var(--text-muted)">Régulière</span>
                     <div class="qty-control">
                       <button class="qty-btn" id="qtyMinus">−</button>
                       <span class="qty-value" id="qtyVal">${card.quantity}</span>
@@ -452,10 +454,12 @@ function openModal(cardId) {
                     </div>
                   </div>
                   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                    <span style="font-size:.85rem;color:var(--text-muted)">Version</span>
-                    <button id="foilToggleBtn" class="btn btn-ghost${card.foil ? ' foil-toggle-active' : ''}" style="padding:4px 14px;font-size:.8rem;gap:4px">
-                      ${card.foil ? '✦ Foil' : '◇ Normal'}
-                    </button>
+                    <span style="font-size:.9rem;color:var(--text-muted)">Foilée</span>
+                    <div class="qty-control">
+                      <button class="qty-btn" id="qtyFoilMinus">−</button>
+                      <span class="qty-value" id="qtyFoilVal">${card.foilQuantity}</span>
+                      <button class="qty-btn" id="qtyFoilPlus">＋</button>
+                    </div>
                   </div>
                   ${(card.firstAddedAt || card.lastAddedAt) ? `
                   <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px;line-height:1.6">
@@ -463,15 +467,9 @@ function openModal(cardId) {
                     ${card.lastAddedAt && card.lastAddedAt !== card.firstAddedAt ? `<div>Dernière modif. : <strong style="color:var(--text)">${formatDate(card.lastAddedAt)}</strong></div>` : ''}
                   </div>` : ''}
                 </div>`
-              : `<div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                    <span style="font-size:.85rem;color:var(--text-muted)">Version foil ?</span>
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem">
-                      <input type="checkbox" id="addFoilCheck" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
-                      <span>Foil</span>
-                    </label>
-                  </div>
-                  <button class="btn btn-accent btn-full" id="addCardBtn">+ Ajouter à la collection</button>
+              : `<div style="display:flex;gap:10px;flex-direction:column">
+                  <button class="btn btn-accent btn-full" id="addCardRegularBtn">◇ Ajouter exemplaire normal</button>
+                  <button class="btn btn-ghost btn-full" id="addCardFoilBtn">✦ Ajouter exemplaire foil</button>
                 </div>`}
           </div>
         </div>
@@ -485,14 +483,13 @@ function openModal(cardId) {
   document.getElementById('modalContent').addEventListener('click', e => e.stopPropagation());
 
   if (card.owned) {
-    document.getElementById('qtyMinus').addEventListener('click', () => updateQty(card.id, card.quantity - 1));
-    document.getElementById('qtyPlus').addEventListener('click', () => updateQty(card.id, card.quantity + 1));
-    document.getElementById('foilToggleBtn').addEventListener('click', () => toggleFoil(card.id));
+    document.getElementById('qtyMinus').addEventListener('click', () => updateQtyRegular(card.id, card.quantity - 1));
+    document.getElementById('qtyPlus').addEventListener('click', () => updateQtyRegular(card.id, card.quantity + 1));
+    document.getElementById('qtyFoilMinus').addEventListener('click', () => updateQtyFoiled(card.id, (card.foilQuantity || 0) - 1));
+    document.getElementById('qtyFoilPlus').addEventListener('click', () => updateQtyFoiled(card.id, (card.foilQuantity || 0) + 1));
   } else {
-    document.getElementById('addCardBtn').addEventListener('click', () => {
-      const foil = document.getElementById('addFoilCheck')?.checked ?? false;
-      addCard(card.id, foil);
-    });
+    document.getElementById('addCardRegularBtn').addEventListener('click', () => addCard(card.id, 1, 0));
+    document.getElementById('addCardFoilBtn').addEventListener('click', () => addCard(card.id, 0, 1));
   }
 }
 
@@ -635,8 +632,8 @@ async function doAddSearch(query) {
   }
 }
 
-async function addCard(cardId, foil = false) {
-  const updated = await api.addToCollection(cardId, 1, foil);
+async function addCard(cardId, quantity = 1, foilQuantity = 0) {
+  const updated = await api.addToCollection(cardId, quantity, foilQuantity);
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
@@ -648,7 +645,7 @@ async function updateQty(cardId, qty) {
   if (qty <= 0) {
     updated = await api.removeFromCollection(cardId);
   } else {
-    updated = await api.updateQuantity(cardId, qty);
+    updated = await api.updateQuantity(cardId, qty, undefined);
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
@@ -656,10 +653,32 @@ async function updateQty(cardId, qty) {
   openModal(cardId);
 }
 
-async function toggleFoil(cardId) {
+async function updateQtyRegular(cardId, qty) {
   const card = collState.cards.find(c => c.id === cardId);
   if (!card) return;
-  const updated = await api.updateQuantity(cardId, card.quantity, !card.foil);
+  const foilQty = card.foilQuantity || 0;
+  let updated;
+  if (qty <= 0 && foilQty <= 0) {
+    updated = await api.removeFromCollection(cardId);
+  } else {
+    updated = await api.updateQuantity(cardId, qty, foilQty);
+  }
+  collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  collState.modal = updated;
+  renderCards();
+  openModal(cardId);
+}
+
+async function updateQtyFoiled(cardId, qty) {
+  const card = collState.cards.find(c => c.id === cardId);
+  if (!card) return;
+  const regQty = card.quantity || 0;
+  let updated;
+  if (regQty <= 0 && qty <= 0) {
+    updated = await api.removeFromCollection(cardId);
+  } else {
+    updated = await api.updateQuantity(cardId, regQty, qty);
+  }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
@@ -1295,9 +1314,11 @@ async function handleFoundCards(cards, num) {
 }
 
 async function autoAddCard(card, foil = false) {
-  const updated = await api.addToCollection(card.id, 1, foil);
+  const quantity = foil ? 0 : 1;
+  const foilQuantity = foil ? 1 : 0;
+  const updated = await api.addToCollection(card.id, quantity, foilQuantity);
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
-  setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity})`, 'success');
+  setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity + updated.foilQuantity})`, 'success');
   playBeep(880, 200);
   navigator.vibrate?.([100, 50, 100]);
   return updated;
@@ -1316,7 +1337,7 @@ function renderCardConfirmation(card) {
   const newCardBanner = isNewCard
     ? `<div style="background:#d32f2f;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:4px 8px;border-radius:6px;margin-bottom:6px;text-align:center">Nouvelle carte</div>`
     : '';
-  const ownedQty = card.owned ? card.quantity : 0;
+  const ownedQty = card.owned ? ((card.quantity || 0) + (card.foilQuantity || 0)) : 0;
   const ownedInfo = `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px">En collection : <strong style="color:var(--text)">×${ownedQty}</strong></div>`;
   area.innerHTML = `
     <div style="padding:12px">

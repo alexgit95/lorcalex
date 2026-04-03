@@ -125,6 +125,7 @@ public class CardService {
         }
         dto.setOwned(uc != null);
         dto.setQuantity(uc != null ? uc.getQuantity() : 0);
+        dto.setFoilQuantity(uc != null ? uc.getFoilQuantity() : 0);
         dto.setFoil(uc != null && Boolean.TRUE.equals(uc.getFoil()));
         dto.setFirstAddedAt(uc != null ? uc.getFirstAddedAt() : null);
         dto.setLastAddedAt(uc != null ? uc.getLastAddedAt() : null);

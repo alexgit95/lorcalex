@@ -28,17 +28,22 @@ public class CollectionController {
         Long cardId = Long.parseLong(String.valueOf(body.get("cardId")));
         int quantity = body.containsKey("quantity")
                 ? Integer.parseInt(String.valueOf(body.get("quantity"))) : 1;
+        int foilQuantity = body.containsKey("foilQuantity")
+                ? Integer.parseInt(String.valueOf(body.get("foilQuantity"))) : 0;
         boolean foil = body.containsKey("foil") && Boolean.parseBoolean(String.valueOf(body.get("foil")));
-        return ResponseEntity.ok(collectionService.addCard(cardId, quantity, foil));
+        return ResponseEntity.ok(collectionService.addCard(cardId, quantity, foilQuantity, foil));
     }
 
     @PutMapping("/{cardId}")
     public ResponseEntity<CardDTO> updateQuantity(
             @PathVariable Long cardId,
             @RequestBody Map<String, Object> body) {
-        int quantity = Integer.parseInt(String.valueOf(body.get("quantity")));
+        int quantity = body.containsKey("quantity") 
+                ? Integer.parseInt(String.valueOf(body.get("quantity"))) : 0;
+        int foilQuantity = body.containsKey("foilQuantity") 
+                ? Integer.parseInt(String.valueOf(body.get("foilQuantity"))) : 0;
         Boolean foil = body.containsKey("foil") ? Boolean.parseBoolean(String.valueOf(body.get("foil"))) : null;
-        return ResponseEntity.ok(collectionService.updateQuantity(cardId, quantity, foil));
+        return ResponseEntity.ok(collectionService.updateQuantity(cardId, quantity, foilQuantity, foil));
     }
 
     @DeleteMapping("/{cardId}")

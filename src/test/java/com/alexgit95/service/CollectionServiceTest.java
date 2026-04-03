@@ -61,6 +61,7 @@ class CollectionServiceTest {
             dto.setId(c.getId());
             dto.setOwned(uc != null);
             dto.setQuantity(uc != null ? uc.getQuantity() : 0);
+            dto.setFoilQuantity(uc != null ? uc.getFoilQuantity() : 0);
             dto.setFoil(uc != null && Boolean.TRUE.equals(uc.getFoil()));
             return dto;
         });
@@ -74,7 +75,7 @@ class CollectionServiceTest {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CardDTO result = collectionService.addCard(10L, 1, false);
+        CardDTO result = collectionService.addCard(10L, 1, 0, false);
 
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
@@ -91,7 +92,7 @@ class CollectionServiceTest {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CardDTO result = collectionService.addCard(10L, 2, true);
+        CardDTO result = collectionService.addCard(10L, 2, 0, true);
 
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
@@ -111,7 +112,7 @@ class CollectionServiceTest {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        collectionService.addCard(10L, 1, true);
+        collectionService.addCard(10L, 1, 0, true);
 
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
@@ -132,7 +133,7 @@ class CollectionServiceTest {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CardDTO result = collectionService.updateQuantity(10L, 3, true);
+        CardDTO result = collectionService.updateQuantity(10L, 3, 0, true);
 
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
@@ -152,7 +153,7 @@ class CollectionServiceTest {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        collectionService.updateQuantity(10L, 2, null);
+        collectionService.updateQuantity(10L, 2, 0, null);
 
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
@@ -169,7 +170,7 @@ class CollectionServiceTest {
         existing.setCard(card);
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
 
-        collectionService.updateQuantity(10L, 0, null);
+        collectionService.updateQuantity(10L, 0, 0, null);
 
         verify(collectionRepository).delete(existing);
         verify(collectionRepository, never()).save(any());
@@ -181,7 +182,7 @@ class CollectionServiceTest {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        collectionService.updateQuantity(10L, 5, true);
+        collectionService.updateQuantity(10L, 5, 0, true);
 
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
