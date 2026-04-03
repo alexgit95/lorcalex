@@ -35,6 +35,7 @@ et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Interface utilisateur cohérente** : Les résultats de recherche utilisent désormais le même système de deux boutons (Normal/Foil) que la modale, remplaçant l'ancien système checkbox + bouton unique.
 - **Compatibilité Java 25** : Mise à jour de Lombok v1.18.44 et configuration des `<annotationProcessorPaths>` dans Maven pour résoudre le problème `TypeTag :: UNKNOWN`.
 - **Tests unitaires** : Mise à jour de tous les appels de méthode `CollectionServiceTest` avec les nouvelles signatures incluant `foilQuantity`.
 

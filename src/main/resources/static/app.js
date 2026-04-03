@@ -574,10 +574,8 @@ async function doAddSearch(query) {
                 <button class="qty-btn" data-action="plus" data-id="${c.id}" data-qty="${c.quantity}">＋</button>
                </div>`
             : `<div class="add-action-container" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--text-muted)">
-                  <input type="checkbox" class="foil-check" data-id="${c.id}" style="accent-color:var(--accent)"> Foil
-                </label>
-                <button class="btn btn-accent" style="padding:6px 14px;font-size:.85rem" data-action="add" data-id="${c.id}">+ Ajouter</button>
+                <button class="btn btn-accent" style="padding:4px 10px;font-size:.7rem" data-action="add-regular" data-id="${c.id}">◇ Normal</button>
+                <button class="btn btn-ghost" style="padding:4px 10px;font-size:.7rem" data-action="add-foil" data-id="${c.id}">✦ Foil</button>
                </div>`}
         </div>`).join('')}
     </div>`;
@@ -588,10 +586,10 @@ async function doAddSearch(query) {
       const cardId = parseInt(btn.dataset.id);
       const action = btn.dataset.action;
       let updated;
-      if (action === 'add') {
-        const foilCheck = area.querySelector(`.foil-check[data-id="${cardId}"]`);
-        const foil = foilCheck ? foilCheck.checked : false;
-        updated = await api.addToCollection(cardId, 1, foil);
+      if (action === 'add-regular') {
+        updated = await api.addToCollection(cardId, 1, 0);
+      } else if (action === 'add-foil') {
+        updated = await api.addToCollection(cardId, 0, 1);
       } else if (action === 'plus') {
         updated = await api.updateQuantity(cardId, parseInt(btn.dataset.qty) + 1);
       } else if (action === 'minus') {
@@ -617,10 +615,8 @@ async function doAddSearch(query) {
           if (target) target.outerHTML = ctrl;
         } else {
           const ab = `<div class="add-action-container" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--text-muted)">
-              <input type="checkbox" class="foil-check" data-id="${updated.id}" style="accent-color:var(--accent)"> Foil
-            </label>
-            <button class="btn btn-accent" style="padding:6px 14px;font-size:.85rem" data-action="add" data-id="${updated.id}">+ Ajouter</button>
+            <button class="btn btn-accent" style="padding:4px 10px;font-size:.7rem" data-action="add-regular" data-id="${updated.id}">◇ Normal</button>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:.7rem" data-action="add-foil" data-id="${updated.id}">✦ Foil</button>
           </div>`;
           const target = addContainer || qtyControl;
           if (target) target.outerHTML = ab;
@@ -1355,19 +1351,21 @@ function renderCardConfirmation(card) {
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:16px;flex-direction:column">
-        <label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-size:.85rem;color:var(--text-muted)">
-          <input type="checkbox" id="scanFoilCheck" style="accent-color:var(--accent);width:16px;height:16px">
-          Version foil
-        </label>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-accent btn-full" id="confirmAddBtn">${card.owned ? '+ Ajouter un exemplaire' : '✓ Ajouter à la collection'}</button>
+          <button class="btn btn-accent btn-full" id="confirmAddRegularBtn">◇ Ajouter normal</button>
+          <button class="btn btn-ghost btn-full" id="confirmAddFoilBtn">✦ Ajouter foil</button>
+        </div>
+        <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" id="restartScanBtn" style="flex-shrink:0;padding:0 14px">↻ Recommencer</button>
         </div>
       </div>
     </div>`;
-  document.getElementById('confirmAddBtn').addEventListener('click', async () => {
-    const foil = document.getElementById('scanFoilCheck')?.checked ?? false;
-    await autoAddCard(card, foil);
+  document.getElementById('confirmAddRegularBtn').addEventListener('click', async () => {
+    await autoAddCard(card, false);
+    restartScannerCapture();
+  });
+  document.getElementById('confirmAddFoilBtn').addEventListener('click', async () => {
+    await autoAddCard(card, true);
     restartScannerCapture();
   });
   document.getElementById('restartScanBtn').addEventListener('click', restartScannerCapture);
