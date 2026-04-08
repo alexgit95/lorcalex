@@ -3,7 +3,7 @@
 # Le frontend (HTML/JS/CSS vanilla) est dans src/main/resources/static
 # et sera inclus automatiquement dans le JAR par Maven.
 # ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17.0.18_8-jdk AS backend-build
+FROM --platform=linux/arm64 eclipse-temurin:25.0.2_10-jdk-alpine AS backend-build
 WORKDIR /app
 
 COPY .mvn .mvn
@@ -24,7 +24,8 @@ RUN ./mvnw package -DskipTests -B
 # ─────────────────────────────────────────────────────────────
 # Stage 2 : Image finale légère (JRE seulement)
 # ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17.0.18_8-jre
+FROM --platform=linux/arm64 eclipse-temurin:25.0.2_10-jre-jammy
+
 WORKDIR /app
 
 
