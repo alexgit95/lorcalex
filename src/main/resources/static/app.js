@@ -1104,8 +1104,7 @@ function parseCardCode(rawText) {
   const cardNum = parseInt(m[1], 10);
   const total   = parseInt(m[2], 10);
   if (cardNum < 1 || cardNum > 999) return null;
-  if (total   < 2  || total   > 400) return null;
-  if (cardNum > total)               return null;
+  if (total   < 2  || total   > 500) return null;
   const after  = text.slice(text.indexOf(m[0]) + m[0].length);
   const langM  = after.match(/\b([A-Z]{2})\b/);
   let setNum = null;
