@@ -296,8 +296,8 @@ function renderCollection() {
         </div>
         <div id="editionBar" class="filter-bar">${loadingHTML('')}</div>
         <div id="filterBar" class="filter-bar">
-          ${['all','owned','missing'].map((k,i) =>
-            `<button class="filter-chip${collState.filter===k?' active':''}" data-filter="${k}">${['Toutes','Possédées','Manquantes'][i]}</button>`
+          ${['all','owned','missing','foil'].map((k,i) =>
+            `<button class="filter-chip${collState.filter===k?' active':''}" data-filter="${k}">${['Toutes','Possédées','Manquantes','✦ Foil'][i]}</button>`
           ).join('')}
         </div>
         <div class="search-bar">
@@ -390,6 +390,7 @@ function renderCards() {
   const filtered = cards.filter(c => {
     if (filter === 'owned' && !c.owned) return false;
     if (filter === 'missing' && c.owned) return false;
+    if (filter === 'foil' && !(c.foilQuantity > 0)) return false;
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
