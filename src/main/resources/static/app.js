@@ -98,6 +98,9 @@ const api = {
 
   fullBackup: () => apiFetch('/admin/backup'),
   fullRestore: (data) => apiFetch('/admin/restore', { method: 'POST', body: JSON.stringify(data) }),
+
+  getRecentCards: (limit = 20) => apiFetch('/collection/recent?limit=' + limit),
+
   importCompanionCollection: (file, merge = true) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -155,11 +158,12 @@ function handleRoute() {
 
 function renderPage(page) {
   switch (page) {
-    case 'login':      renderLogin();      break;
-    case 'collection': renderCollection(); break;
-    case 'statistics': renderStatistics(); break;
-    case 'scanner':    renderScanner();    break;
-    case 'admin':      renderAdmin();      break;
+    case 'login':      renderLogin();           break;
+    case 'collection': renderCollection();      break;
+    case 'statistics': renderStatistics();      break;
+    case 'scanner':    renderScanner();         break;
+    case 'recent':     renderRecentScansPage(); break;
+    case 'admin':      renderAdmin();           break;
     default:           navigate('collection');
   }
 }
@@ -183,6 +187,9 @@ function navHTML(active) {
     ${item('scanner',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 6.5v3h-3v-3h3M11 5H5v6h6V5zm-1.5 9.5v3h-3v-3h3M11 13H5v6h6v-6zm6.5-6.5v3h-3v-3h3M19 5h-6v6h6V5zm-6 8h1.5v1.5H13V13zm1.5 1.5H16V16h-1.5v-1.5zM16 13h1.5v1.5H16V13zm-3 3h1.5v1.5H13V16zm1.5 1.5H16V19h-1.5v-1.5zM16 16h1.5v1.5H16V16zm1.5-1.5H19V16h-1.5v-1.5zm0 3H19V19h-1.5v-1.5zM22 7h-2V4h-3V2h5v5zm0 15v-5h-2v3h-3v2h5zM2 22h5v-2H4v-3H2v5zM2 2v5h2V4h3V2H2z"/></svg>`,
       'Scanner')}
+    ${item('recent',
+      `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v4l5-5-5-5v4z"/></svg>`,
+      'Récents')}
     ${item('admin',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>`,
       'Admin')}
@@ -206,6 +213,16 @@ function formatDate(isoStr) {
   const d = new Date(isoStr);
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
+
+function formatDateTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+let recentCardsState = [];
+let recentLimit = 20;
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
@@ -417,8 +434,90 @@ function cardItemHTML(card) {
   </div>`;
 }
 
+function recentCardItemHTML(card) {
+  const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
+  const totalQty = (card.quantity || 0) + (card.foilQuantity || 0);
+  const hasFoil = card.foilQuantity && card.foilQuantity > 0;
+  const scanDate = card.lastAddedAt ? formatDateTime(card.lastAddedAt) : '';
+  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}" data-id="${card.id}">
+    ${card.imageUrl
+      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
+    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : ''}
+    <div class="card-info">
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
+      <div class="card-name">${esc(card.name)}</div>
+      ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
+      ${scanDate ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">🕐 ${scanDate}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderRecentScansPage() {
+  document.getElementById('app').innerHTML = `
+    <div class="app">
+      <div class="page">
+        <div class="page-header"><h1>\uD83D\uDD50 Derniers scans</h1></div>
+        <div class="filter-bar" id="recentLimitBar">
+          ${[10, 20, 25, 50].map(n =>
+            `<button class="filter-chip${recentLimit === n ? ' active' : ''}" data-limit="${n}">${n} cartes</button>`
+          ).join('')}
+        </div>
+        <div id="recentScansArea">${loadingHTML()}</div>
+      </div>
+      ${navHTML('recent')}
+    </div>
+    <div id="modalArea"></div>`;
+
+  document.getElementById('recentLimitBar').addEventListener('click', e => {
+    const btn = e.target.closest('[data-limit]');
+    if (!btn) return;
+    recentLimit = parseInt(btn.dataset.limit);
+    document.querySelectorAll('#recentLimitBar .filter-chip').forEach(b =>
+      b.classList.toggle('active', parseInt(b.dataset.limit) === recentLimit)
+    );
+    const area = document.getElementById('recentScansArea');
+    if (area) area.innerHTML = loadingHTML('');
+    api.getRecentCards(recentLimit).then(cards => {
+      recentCardsState = cards || [];
+      renderRecentScansSection();
+    }).catch(() => {
+      const el = document.getElementById('recentScansArea');
+      if (el) el.innerHTML = `<div class="empty-state"><h3>Erreur</h3><p>Impossible de charger les derniers scans.</p></div>`;
+    });
+  });
+
+  api.getRecentCards(recentLimit).then(cards => {
+    recentCardsState = cards || [];
+    renderRecentScansSection();
+  }).catch(() => {
+    const el = document.getElementById('recentScansArea');
+    if (el) el.innerHTML = `<div class="empty-state"><h3>Erreur</h3><p>Impossible de charger les derniers scans.</p></div>`;
+  });
+}
+
+function renderRecentScansSection() {
+  const area = document.getElementById('recentScansArea');
+  if (!area) return;
+  if (recentCardsState.length === 0) {
+    area.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v4l5-5-5-5v4z"/></svg>
+      <h3>Aucune carte scannée</h3>
+      <p>Les 15 dernières cartes ajoutées apparaîtront ici.</p>
+    </div>`;
+    return;
+  }
+  area.innerHTML = `<div class="cards-grid">${recentCardsState.map(c => recentCardItemHTML(c)).join('')}</div>`;
+  area.querySelectorAll('.card-item').forEach(el => {
+    el.addEventListener('click', () => openModal(parseInt(el.dataset.id)));
+  });
+}
+
 function openModal(cardId) {
-  const card = collState.cards.find(c => c.id === cardId);
+  const card = collState.cards.find(c => c.id === cardId)
+             || recentCardsState.find(c => c.id === cardId);
   if (!card) return;
   collState.modal = card;
 
@@ -650,9 +749,11 @@ async function updateQty(cardId, qty) {
 }
 
 async function updateQtyRegular(cardId, qty) {
-  const card = collState.cards.find(c => c.id === cardId);
-  if (!card) return;
-  const foilQty = card.foilQuantity || 0;
+  const sourceCard = collState.cards.find(c => c.id === cardId)
+                  || (collState.modal?.id === cardId ? collState.modal : null)
+                  || recentCardsState.find(c => c.id === cardId);
+  if (!sourceCard) return;
+  const foilQty = sourceCard.foilQuantity || 0;
   let updated;
   if (qty <= 0 && foilQty <= 0) {
     updated = await api.removeFromCollection(cardId);
@@ -660,15 +761,19 @@ async function updateQtyRegular(cardId, qty) {
     updated = await api.updateQuantity(cardId, qty, foilQty);
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
+  renderRecentScansSection();
   openModal(cardId);
 }
 
 async function updateQtyFoiled(cardId, qty) {
-  const card = collState.cards.find(c => c.id === cardId);
-  if (!card) return;
-  const regQty = card.quantity || 0;
+  const sourceCard = collState.cards.find(c => c.id === cardId)
+                  || (collState.modal?.id === cardId ? collState.modal : null)
+                  || recentCardsState.find(c => c.id === cardId);
+  if (!sourceCard) return;
+  const regQty = sourceCard.quantity || 0;
   let updated;
   if (regQty <= 0 && qty <= 0) {
     updated = await api.removeFromCollection(cardId);
@@ -676,8 +781,10 @@ async function updateQtyFoiled(cardId, qty) {
     updated = await api.updateQuantity(cardId, regQty, qty);
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
+  renderRecentScansSection();
   openModal(cardId);
 }
 
@@ -1317,6 +1424,8 @@ async function autoAddCard(card, foil = false) {
   setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity + updated.foilQuantity})`, 'success');
   playBeep(880, 200);
   navigator.vibrate?.([100, 50, 100]);
+  // Rafraîchit le cache récents (mis à jour à la prochaine visite de l'onglet Récents)
+  api.getRecentCards(recentLimit).then(cards => { recentCardsState = cards || []; }).catch(() => {});
   return updated;
 }
 

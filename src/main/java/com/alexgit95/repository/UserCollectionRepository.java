@@ -1,6 +1,7 @@
 package com.alexgit95.repository;
 
 import com.alexgit95.model.UserCollection;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -33,4 +34,7 @@ public interface UserCollectionRepository extends JpaRepository<UserCollection, 
 
     @Query("SELECT uc FROM UserCollection uc JOIN FETCH uc.card")
     List<UserCollection> findAllWithCard();
+
+    @Query("SELECT uc FROM UserCollection uc JOIN FETCH uc.card c LEFT JOIN FETCH c.edition ORDER BY uc.lastAddedAt DESC")
+    List<UserCollection> findRecentWithCard(Pageable pageable);
 }
