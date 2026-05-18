@@ -39,6 +39,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/health").permitAll()
+                // /api/export is permitted at the security level; API key validation
+                // is performed inside ExportController itself.
+                .requestMatchers("/api/export").permitAll()
                 .requestMatchers(
                         "/", "/index.html",
                         "/login", "/statistics", "/scanner", "/admin",

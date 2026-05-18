@@ -5,9 +5,82 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/),
 et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
+
 ---
 
-## [Unreleased] — Amélioration du système Foil
+## [2.3.2] — Correction scanner cartes enchantées
+
+### Fixed
+
+- **Scanner OCR** : les cartes dont le numéro dépasse le total imprimé (cartes enchantées, ex. `205/204`) étaient rejetées silencieusement par la validation `cardNum > total`. Cette contrainte est supprimée.
+- Borne maximale du champ `total` relevée de 400 à 500 pour anticiper les grands sets futurs.
+
+---
+
+## [2.3.1] — Correction sauvegarde/restauration Foil
+
+### Fixed
+
+- **Sauvegarde complète** : le champ `foilQuantity` était absent du JSON exporté — les cartes foil apparaissaient comme normales après restauration. Il est désormais inclus dans chaque entrée de collection (`"foilQuantity": N`).
+- **Restauration complète** : `foilQuantity` est maintenant relu et réappliqué sur l'entité `UserCollection` lors de la restauration.
+- **Tests** : deux nouveaux cas dans `BackupRestoreIntegrationTest` couvrent explicitement la persistance de `foilQuantity` à l'export et à la restauration.
+
+---
+
+## [2.3.0] — Clés API & Export programmable
+
+### Added
+
+- **Clés API** : génération de clés API depuis la page Administration pour accéder à un endpoint d'export sans JWT.
+  - Chaque clé dispose d'un **nom** descriptif, d'une **durée de validité** choisie (7 j / 30 j / 90 j / 180 j / 1 an / 10 ans) et d'une **date d'expiration**.
+  - La clé en clair est affichée **une seule fois** à la création, avec un bouton **Copier** ; seul son hash SHA-256 est persisté.
+  - **Dernière utilisation** : `lastUsedAt` est mis à jour à chaque appel réussi.
+- **Endpoint `GET /api/export?apiKey=<clé>`** : retourne le même payload JSON que la sauvegarde complète (éditions + cartes + collection + paramètres), accessible sans authentification JWT — par clé API uniquement.
+- **Section "Clés API" dans l'Administration** : panneau dépliable (accordéon `<details>`) avec :
+  - Formulaire de création (nom + durée).
+  - Tableau des clés existantes : nom, préfixe (8 premiers caractères), date d'expiration, dernière utilisation.
+  - **Ligne rouge** pour les clés expirées.
+  - Bouton **Supprimer** par clé.
+- **Modèle `ApiKey`** : entité JPA (`id`, `name`, `keyHash`, `keyPrefix`, `expiresAt`, `lastUsedAt`, `createdAt`).
+- **`ApiKeyRepository`** : `findByKeyHash(String)`.
+- **`ApiKeyService`** : `generateKey`, `validateAndTouch`, `listKeys`, `deleteKey`, `sha256` (package-visible pour les tests).
+- **`ApiKeyAuthFilter`** : `OncePerRequestFilter` branché avant `JwtAuthenticationFilter` — intercepte `/api/export`, valide la clé et positionne l'authentification dans le `SecurityContext`.
+- **`ApiKeyController`** : `GET /api/admin/apikeys`, `POST /api/admin/apikeys`, `DELETE /api/admin/apikeys/{id}` (JWT requis).
+- **`ExportController`** : `GET /api/export` (authentifié via `ApiKeyAuthFilter`).
+- **Tests unitaires `ApiKeyServiceTest`** : génération, validation (valide/expirée/inconnue/null), `lastUsedAt`, listing, suppression, SHA-256 déterministe.
+- **Tests d'intégration `ApiKeyExportIntegrationTest`** : 200 avec clé valide, 403 sans clé / clé incorrecte / clé expirée, mise à jour de `lastUsedAt`.
+
+### Changed
+
+- `SecurityConfig` : injection de `ApiKeyAuthFilter` et ajout avant `UsernamePasswordAuthenticationFilter`.
+
+
+
+## [2.2.0] — Onglet Derniers scans & filtre Foil
+
+### Added
+
+- **Onglet "Derniers scans"** : nouvel onglet dédié dans la barre de navigation (icône ↻) affichant les N dernières cartes ajoutées à la collection, triées par date d'ajout décroissante.
+  - Même affichage que la collection : image, badge ✦ Foil, compteur de quantité.
+  - Date et heure de scan affichées sous chaque carte.
+  - Sélecteur de limite : **10 / 20 / 25 / 50** cartes (chips cliquables, valeur mémorisée pendant la session). Valeur par défaut : 20.
+  - Clic sur une carte → ouvre la modale de détail habituelle (modification de quantités incluse).
+- **Filtre "✦ Foil"** dans la barre de filtres de la collection : n'affiche que les cartes possédant au moins un exemplaire foilé (`foilQuantity > 0`). Combinable avec la recherche par nom et le filtre par édition.
+
+### Changed
+
+- `UserCollectionRepository` : ajout de la méthode `findRecentWithCard(Pageable)` avec `JOIN FETCH` sur `card` et `edition` — remplace l'ancienne `findTop15ByOrderByLastAddedAtDesc()` qui provoquait une `LazyInitializationException`.
+- `CollectionService` : méthode `getRecentCards(int limit)` avec validation de la valeur autorisée parmi `{10, 20, 25, 50}`.
+- `CollectionController` : endpoint `GET /api/collection/recent?limit=20` avec `@RequestParam(defaultValue = "20")`.
+- `app.js` : route `#/recent` → `renderRecentScansPage()` ; état `recentLimit` persisté en session ; cache `recentCardsState` mis à jour après chaque scan ajouté.
+
+### Fixed
+
+- `LazyInitializationException` sur `GET /api/collection/recent` : la requête JPQL utilise désormais `JOIN FETCH uc.card c LEFT JOIN FETCH c.edition` pour charger toutes les associations en une seule requête SQL.
+
+---
+
+## [2.2.0] — Amélioration du système Foil
 
 ### Added
 
@@ -49,6 +122,24 @@ et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 | Compatibilité | Utilise l'opérateur Elvis (`?:`) en JavaScript pour éviter les valeurs null |
 
 **Build Status** : ✅ `mvn clean compile` passe sans erreur, ✅ tous les tests unitaires réussissent
+
+
+---
+
+## [1.3.1] — 2026-05-18 — Migration Spring Boot 4
+
+### Changed
+
+- **Spring Boot** : migration de 3.x vers **4.0.6**.
+  - `spring-boot-starter-webflux` remplacé par `spring-boot-starter-webclient` (nouveau starter dédié en Spring Boot 4 pour l'auto-configuration du bean `WebClient.Builder`).
+  - Import `TestEntityManager` mis à jour : `org.springframework.boot.data.jpa.test.autoconfigure` → `org.springframework.boot.jpa.test.autoconfigure` (réorganisation des modules Spring Boot 4).
+  - Maven Surefire configuré avec `-javaagent: byte-buddy-agent` pour permettre à Mockito de fonctionner sous Java 25 (l'attachement dynamique d'agent est restreint depuis Java 21+).
+
+### Fixed
+
+- `MockitoInitializationException` : `byte-buddy-agent` chargé explicitement via `<argLine>` dans `maven-surefire-plugin` — résout l'erreur `net.bytebuddy.agent.Installer` introuvable sur Java 25.
+- `ApplicationContext` failure dans les tests d'intégration : absence du bean `WebClient$Builder` corrigée par l'ajout du starter `spring-boot-starter-webclient`.
+- Erreur de compilation `cannot find symbol TestEntityManager` dans `UserCollectionAuditTest` : import corrigé vers le nouveau package `org.springframework.boot.jpa.test.autoconfigure`.
 
 ---
 

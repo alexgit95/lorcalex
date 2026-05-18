@@ -9,10 +9,11 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 
 | Écran | Description |
 |-------|-------------|
-| **Collection** | Cartes triées par set et numéro croissants, filtrage possédées/manquantes, recherche, ajout/retrait. Numéro de set affiché sur chaque carte. |
+| **Collection** | Cartes triées par set et numéro croissants, filtrage possédées/manquantes/**foil**, recherche, ajout/retrait. Numéro de set affiché sur chaque carte. |
 | **Visualisation carte** | Clic sur une carte → grande image plein-écran, compteur de possession, modification de la quantité directement. |
 | **Statistiques** | Graphiques (donut, barres empilées) : progression globale, par set, par rareté |
 | **Scanner** | Scanner **OCR caméra en continu** : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, ajout d'exemplaire, reprise rapide du scan. |
+| **Derniers scans** | Onglet dédié affichant les N dernières cartes ajoutées avec leur date/heure de scan. Sélecteur 10 / 20 / 25 / 50 cartes. |
 | **Administration** | Import du catalogue LorcaJson (URL/fichier), **sauvegarde/restauration complètes** (catalogue + collection + paramètres), export/import JSON de la collection, import **Lorcana Companion** (mode fusion/remplacement) avec barre de progression |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion |
 
@@ -145,6 +146,7 @@ Le token est stocké dans `localStorage` (avec "Se souvenir de moi") ou `session
 - Cartes toujours triées par **numéro de set croissant**, puis par **numéro de carte croissant**.
 - Chaque carte affiche son numéro de set (ex : `S1·#42`).
 - Le sélecteur de set affiche : **Set 1 — Premier Chapitre**, **Set 2 — L'Ascension des Floodborn**, etc.
+- Filtres disponibles : **Toutes**, **Possédées**, **Manquantes**, **✦ Foil** (cartes avec au moins un exemplaire foilé).
 
 ---
 
@@ -196,6 +198,7 @@ Toutes les routes nécessitent un Bearer JWT (sauf `/api/auth/login`).
 | `GET` | `/api/cards/lookup?number=&editionId=` | Lookup par numéro (scanner) |
 | `GET` | `/api/cards/fingerprints` | Empreintes visuelles (compatibilité / maintenance) |
 | `GET/POST` | `/api/collection` | Collection possédée |
+| `GET` | `/api/collection/recent?limit=20` | 10/20/25/50 dernières cartes ajoutées (triées par date décroissante) |
 | `PUT` | `/api/collection/{cardId}` | Modifier quantité |
 | `DELETE` | `/api/collection/{cardId}` | Supprimer de la collection |
 | `GET` | `/api/statistics` | Statistiques complètes |
@@ -207,6 +210,51 @@ Toutes les routes nécessitent un Bearer JWT (sauf `/api/auth/login`).
 | `GET` | `/api/admin/backup` | Sauvegarde complète (éditions + cartes + collection + paramètres) |
 | `POST` | `/api/admin/restore` | Restauration complète depuis une sauvegarde |
 | `POST` | `/api/admin/import/companion?merge=true\|false` | Import Companion (asynchrone) avec mode fusion/remplacement |
+| `GET` | `/api/admin/apikeys` | Liste des clés API (JWT requis) |
+| `POST` | `/api/admin/apikeys` | Créer une clé API (JWT requis) |
+| `DELETE` | `/api/admin/apikeys/{id}` | Supprimer une clé API (JWT requis) |
+| `GET` | `/api/export?apiKey=…` | **Export public** de la collection (clé API uniquement, pas de JWT) |
+
+---
+
+## Clés API & Export programmable
+
+### Principe
+
+Le endpoint `GET /api/export?apiKey=<clé>` retourne le même payload JSON que la sauvegarde complète, mais **sans authentification JWT** — uniquement via une **clé API** générée depuis l'administration.
+
+Cela permet d'accéder à la collection depuis un outil externe (Home Assistant, script Python, etc.) sans exposer le mot de passe ou le JWT.
+
+### Sécurité
+
+- La clé en clair n'est **jamais stockée** : seul son hash SHA-256 est conservé en base.
+- La valeur en clair est affichée **une seule fois** lors de la création — à sauvegarder immédiatement.
+- Chaque clé a une **date d'expiration** (7 j / 30 j / 90 j / 180 j / 1 an / 10 ans).
+- Une clé expirée cesse immédiatement de fonctionner.
+- La **dernière utilisation réussie** est enregistrée pour chaque clé.
+
+### Créer une clé API
+
+1. Ouvrir **Administration → 🔑 Clés API** (section dépliable).
+2. Saisir un **nom** descriptif (ex : "Home Assistant") et choisir una **durée de validité**.
+3. Cliquer **Générer** — la clé en clair s'affiche une seule fois avec un bouton **Copier**.
+
+### Utiliser la clé
+
+```bash
+curl "http://localhost:8181/api/export?apiKey=<votre_clé>"
+```
+
+### Gérer les clés
+
+Le tableau de la section **Clés API** affiche pour chaque clé :
+- Son **nom**
+- Son **préfixe** (8 premiers caractères, pour identification)
+- Sa **date d'expiration** (ligne rouge si expirée)
+- La **dernière utilisation** réussie
+- Un bouton **Supprimer**
+
+
 
 ---
 
