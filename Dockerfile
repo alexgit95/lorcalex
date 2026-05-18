@@ -3,7 +3,7 @@
 # Le frontend (HTML/JS/CSS vanilla) est dans src/main/resources/static
 # et sera inclus automatiquement dans le JAR par Maven.
 # ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17.0.18_8-jdk AS backend-build
+FROM eclipse-temurin:25.0.3_9-jdk AS backend-build
 WORKDIR /app
 
 COPY .mvn .mvn
@@ -24,14 +24,23 @@ RUN ./mvnw package -DskipTests -B
 # ─────────────────────────────────────────────────────────────
 # Stage 2 : Image finale légère (JRE seulement)
 # ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17.0.18_8-jre
+FROM eclipse-temurin:25.0.3_9-jre
 WORKDIR /app
 
 
 
 COPY --from=backend-build /app/target/lorcalex-*.jar app.jar
 
+RUN groupadd --system appgroup && useradd --system --gid appgroup --no-create-home appuser
+USER appuser
+
 EXPOSE 8181
 
+ENV APP_TIMEZONE=Europe/Paris
+
 # Profil docker → PostgreSQL
-ENTRYPOINT ["java", "-jar", "app.jar", "--spring.profiles.active=docker"]
+ENTRYPOINT ["java", \
+    "-Djava.security.egd=file:/dev/./urandom", \
+    "-Duser.timezone=Europe/Paris", \
+    "-Dspring.profiles.active=docker", \
+    "-jar", "app.jar"]
