@@ -8,6 +8,16 @@ et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
 ---
 
+## [2.3.1] — Correction sauvegarde/restauration Foil
+
+### Fixed
+
+- **Sauvegarde complète** : le champ `foilQuantity` était absent du JSON exporté — les cartes foil apparaissaient comme normales après restauration. Il est désormais inclus dans chaque entrée de collection (`"foilQuantity": N`).
+- **Restauration complète** : `foilQuantity` est maintenant relu et réappliqué sur l'entité `UserCollection` lors de la restauration.
+- **Tests** : deux nouveaux cas dans `BackupRestoreIntegrationTest` couvrent explicitement la persistance de `foilQuantity` à l'export et à la restauration.
+
+---
+
 ## [2.3.0] — Clés API & Export programmable
 
 ### Added

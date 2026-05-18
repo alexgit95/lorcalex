@@ -116,6 +116,55 @@ class BackupRestoreIntegrationTest {
         assertThat(uc.getFoil()).isFalse();
     }
 
+    @Test
+    @WithMockUser
+    @DisplayName("restore preserves foilQuantity")
+    void restore_preservesFoilQuantity() throws Exception {
+        LocalDateTime first = LocalDateTime.of(2025, 6, 1, 8, 0, 0);
+        Map<String, Object> payload = buildPayload("ext-foilqty", "TFC", "Premier Chapitre", 1, 2, true, first);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> collection = (List<Map<String, Object>>) payload.get("collection");
+        collection.get(0).put("foilQuantity", 3);
+
+        mockMvc.perform(post("/api/admin/restore")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        UserCollection uc = collectionRepository.findAll().get(0);
+        assertThat(uc.getFoil()).isTrue();
+        assertThat(uc.getQuantity()).isEqualTo(2);
+        assertThat(uc.getFoilQuantity()).isEqualTo(3);
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("backup includes foilQuantity in collection entries")
+    void backup_includesFoilQuantity() throws Exception {
+        Edition ed = saveEdition("TFC", "Premier Chapitre", 1);
+        Card card = saveCard("Elsa", 1, "ext-foilbk", ed);
+
+        UserCollection uc = new UserCollection();
+        uc.setCard(card);
+        uc.setQuantity(1);
+        uc.setFoilQuantity(4);
+        uc.setFoil(true);
+        collectionRepository.save(uc);
+
+        String json = mockMvc.perform(get("/api/admin/backup"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> backup = objectMapper.readValue(json, new tools.jackson.core.type.TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> coll = (List<Map<String, Object>>) backup.get("collection");
+        assertThat(coll).hasSize(1);
+        assertThat(coll.get(0).get("foilQuantity")).isEqualTo(4);
+        assertThat(coll.get(0).get("foil")).isEqualTo(true);
+    }
+
     private Edition saveEdition(String code, String name, int setNumber) {
         Edition ed = new Edition();
         ed.setCode(code);
