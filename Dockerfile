@@ -31,7 +31,16 @@ WORKDIR /app
 
 COPY --from=backend-build /app/target/lorcalex-*.jar app.jar
 
+RUN groupadd --system appgroup && useradd --system --gid appgroup --no-create-home appuser
+USER appuser
+
 EXPOSE 8181
 
+ENV APP_TIMEZONE=Europe/Paris
+
 # Profil docker → PostgreSQL
-ENTRYPOINT ["java", "-jar", "app.jar", "--spring.profiles.active=docker"]
+ENTRYPOINT ["java", \
+    "-Djava.security.egd=file:/dev/./urandom", \
+    "-Duser.timezone=Europe/Paris", \
+    "-Dspring.profiles.active=docker", \
+    "-jar", "app.jar"]
