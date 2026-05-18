@@ -5,10 +5,144 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/),
 et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
-
 ---
 
 ## [2.3.2] — Correction scanner cartes enchantées
+
+### Fixed
+
+- **Scanner OCR** : les cartes dont le numéro dépasse le total imprimé (cartes enchantées, ex. `205/204`) étaient rejetées silencieusement par la validation `cardNum > total`. Cette contrainte est supprimée.
+- Borne maximale du champ `total` relevée de 400 à 500 pour anticiper les grands sets futurs.
+
+---
+
+## [2.3.1] — Correction sauvegarde/restauration Foil
+
+### Fixed
+
+- **Sauvegarde complète** : le champ `foilQuantity` était absent du JSON exporté — les cartes foil apparaissaient comme normales après restauration. Il est désormais inclus dans chaque entrée de collection (`"foilQuantity": N`).
+- **Restauration complète** : `foilQuantity` est maintenant relu et réappliqué sur l'entité `UserCollection` lors de la restauration.
+- **Tests** : deux nouveaux cas dans `BackupRestoreIntegrationTest` couvrent explicitement la persistance de `foilQuantity` à l'export et à la restauration.
+
+---
+
+## [2.3.0] — Clés API & Export programmable
+
+### Added
+
+- **Clés API** : génération de clés API depuis la page Administration pour accéder à un endpoint d'export sans JWT.
+  - Chaque clé dispose d'un **nom** descriptif, d'une **durée de validité** choisie (7 j / 30 j / 90 j / 180 j / 1 an / 10 ans) et d'une **date d'expiration**.
+  - La clé en clair est affichée **une seule fois** à la création avec un bouton **Copier** ; seul son hash SHA-256 est persisté en base.
+  - **Dernière utilisation** : `lastUsedAt` est mis à jour à chaque appel réussi.
+- **Endpoint `GET /api/export?apiKey=<clé>`** : retourne le même payload JSON que la sauvegarde complète (éditions + cartes + collection + paramètres), accessible sans authentification JWT — par clé API uniquement. La validation est effectuée directement dans le contrôleur.
+- **Section "Clés API" dans l'Administration** : panneau dépliable (`<details>`) avec :
+  - Formulaire de création (nom + durée de validité).
+  - Tableau des clés : nom, préfixe (8 premiers caractères), date d'expiration, dernière utilisation.
+  - **Ligne rouge** pour les clés expirées.
+  - Bouton **Supprimer** par clé.
+- **Modèle `ApiKey`** : entité JPA (`id`, `name`, `keyHash`, `keyPrefix`, `expiresAt`, `lastUsedAt`, `createdAt`).
+- **`ApiKeyRepository`** : `findByKeyHash(String)`.
+- **`ApiKeyService`** : `generateKey`, `validateAndTouch`, `listKeys`, `deleteKey`, `sha256`.
+- **`ApiKeyController`** : `GET /api/admin/apikeys`, `POST /api/admin/apikeys`, `DELETE /api/admin/apikeys/{id}` (JWT requis).
+- **`ExportController`** : `GET /api/export` — validation de clé API intégrée, route déclarée `permitAll()` dans Spring Security.
+- **Tests unitaires `ApiKeyServiceTest`** : génération, validation (valide / expirée / inconnue / null), `lastUsedAt`, listing, suppression, SHA-256 déterministe.
+- **Tests d'intégration `ApiKeyExportIntegrationTest`** : 200 avec clé valide, 403 sans clé / clé incorrecte / clé expirée, mise à jour de `lastUsedAt`.
+
+### Changed
+
+- `SecurityConfig` : route `/api/export` ajoutée en `permitAll()`.
+
+---
+
+## [2.2.0] — Onglet Derniers scans & filtre Foil
+
+### Added
+
+- **Onglet "Derniers scans"** : nouvel onglet dédié dans la barre de navigation (icône ↻) affichant les N dernières cartes ajoutées à la collection, triées par date d'ajout décroissante.
+  - Même affichage que la collection : image, badge ✦ Foil, compteur de quantité.
+  - Date et heure de scan affichées sous chaque carte.
+  - Sélecteur de limite : **10 / 20 / 25 / 50** cartes (chips cliquables, valeur mémorisée pendant la session). Valeur par défaut : 20.
+  - Clic sur une carte → ouvre la modale de détail habituelle (modification de quantités incluse).
+- **Filtre "✦ Foil"** dans la barre de filtres de la collection : n'affiche que les cartes possédant au moins un exemplaire foilé (`foilQuantity > 0`). Combinable avec la recherche par nom et le filtre par édition.
+
+### Changed
+
+- `UserCollectionRepository` : ajout de la méthode `findRecentWithCard(Pageable)` avec `JOIN FETCH` sur `card` et `edition`.
+- `CollectionService` : méthode `getRecentCards(int limit)` avec validation parmi `{10, 20, 25, 50}`.
+- `CollectionController` : endpoint `GET /api/collection/recent?limit=20`.
+- `app.js` : route `#/recent` → `renderRecentScansPage()` ; état `recentLimit` persisté en session ; cache `recentCardsState` mis à jour après chaque scan.
+
+### Fixed
+
+- `LazyInitializationException` sur `GET /api/collection/recent` : la requête JPQL utilise désormais `JOIN FETCH uc.card c LEFT JOIN FETCH c.edition` pour charger toutes les associations en une seule requête SQL.
+
+---
+
+## [2.1.0] — Suivi dual Regular / Foil
+
+### Added
+
+- **Suivi dual des quantités Foil** : la collection distingue désormais `quantity` (exemplaires réguliers) et `foilQuantity` (exemplaires foil).
+- **Import Companion amélioré** : le champ `Type` du fichier Companion est utilisé pour séparer les cartes Regular et Foiled dans les quantités.
+- **Interface utilisateur** : deux boutons distincts pour ajouter des cartes — "◇ Ajouter exemplaire normal" et "✦ Ajouter exemplaire foil".
+- **Affichage** : les cartes affichent le total combiné (regular + foil) avec un badge doré ✦ si des exemplaires foil sont présents.
+
+### Changed
+
+- **Modèle `UserCollection`** : ajout du champ `Integer foilQuantity = 0`.
+- **DTO `CardDTO`** : ajout du champ `foilQuantity` en réponse API.
+- **`LorcaJsonService`** : `doCompanionImport()` sépare les quantités selon le champ `Type` (case-insensitive).
+- **`CollectionService`** : nouvelles signatures `addCard(Long, int, int, boolean)` et `updateQuantity(Long, int, int, Boolean)`.
+- **`CollectionController`** : endpoints `POST` et `PUT` acceptent `foilQuantity` dans le body.
+- **`app.js`** : nouvelle signature `addCard(cardId, quantity, foilQuantity)` ; fonctions séparées `updateQtyRegular()` et `updateQtyFoiled()`.
+
+### Fixed
+
+- Une entrée `UserCollection` n'est supprimée que si `quantity` **et** `foilQuantity` sont tous deux ≤ 0.
+- Compatibilité Java 25 : mise à jour Lombok v1.18.44 et configuration `<annotationProcessorPaths>` Maven pour résoudre `TypeTag::UNKNOWN`.
+- Tests unitaires mis à jour avec les nouvelles signatures incluant `foilQuantity`.
+
+---
+
+## [2.0.0] — Cartes foil & dates d'ajout
+
+### Added
+
+- **Statut foil** : chaque entrée de collection peut être marquée comme foil avec badge ✦ dans la grille.
+- **Toggle foil dans le détail** : bouton **◇ Normal / ✦ Foil** dans la vue carte pour basculer la version.
+- **Choix foil à l'ajout** : case à cocher "Foil" proposée lors de l'ajout via la modale ou le scanner.
+- **Date de premier ajout** (`firstAddedAt`) et **date de dernière modification** (`lastAddedAt`) mémorisées par entrée de collection et affichées dans la vue détail.
+
+### Changed
+
+- **`UserCollection`** : champs `foil`, `firstAddedAt`, `lastAddedAt`. `@PrePersist` utilise des null-checks pour ne pas écraser les dates pré-initialisées (scénario restauration). `@PreUpdate` maintient `lastAddedAt` automatiquement.
+- **`CardDTO`** : champs `foil`, `firstAddedAt`, `lastAddedAt` exposés dans tous les endpoints collection.
+- **`POST /api/collection`** : accepte `foil` dans le body.
+- **`PUT /api/collection/{cardId}`** : accepte `foil` en option (`null` = conserve la valeur existante).
+- **Sauvegarde complète** : `foil`, `firstAddedAt`, `lastAddedAt` inclus dans le JSON exporté.
+- **Restauration complète** : ces champs sont relus depuis le backup et injectés avant persist, préservant les dates d'origine. Backup ancien format → `@PrePersist` remplit avec `now()`.
+
+### Fixed
+
+- `@PrePersist` écrasait `firstAddedAt`/`lastAddedAt` lors d'une restauration : remplacé par `if (field == null)` avant d'attribuer `now()`.
+- La restauration ne lisait pas `firstAddedAt`/`lastAddedAt` depuis le backup : `fullRestore()` parse et injecte ces champs via `LocalDateTime.parse()` si présents.
+
+---
+
+## [1.3.1] — Migration Spring Boot 4
+
+### Changed
+
+- **Spring Boot** : migration de 3.x vers **4.0.6**.
+- `spring-boot-starter-webflux` remplacé par `spring-boot-starter-webclient` (nouveau starter dédié en Spring Boot 4).
+- Import `TestEntityManager` mis à jour vers `org.springframework.boot.jpa.test.autoconfigure` (réorganisation des modules).
+- Maven Surefire configuré avec `-javaagent:byte-buddy-agent` pour Mockito sous Java 25.
+
+### Fixed
+
+- `MockitoInitializationException` : `byte-buddy-agent` chargé explicitement via `<argLine>` dans `maven-surefire-plugin`.
+- `ApplicationContext` failure dans les tests d'intégration : bean `WebClient.Builder` manquant, corrigé par l'ajout du starter `spring-boot-starter-webclient`.
+- Erreur de compilation `cannot find symbol TestEntityManager` dans `UserCollectionAuditTest` : import corrigé.
 
 ### Fixed
 
