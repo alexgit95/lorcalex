@@ -5,9 +5,34 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/),
 et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
+
 ---
 
-## [Unreleased] — Amélioration du système Foil
+## [2.2.0] — Onglet Derniers scans & filtre Foil
+
+### Added
+
+- **Onglet "Derniers scans"** : nouvel onglet dédié dans la barre de navigation (icône ↻) affichant les N dernières cartes ajoutées à la collection, triées par date d'ajout décroissante.
+  - Même affichage que la collection : image, badge ✦ Foil, compteur de quantité.
+  - Date et heure de scan affichées sous chaque carte.
+  - Sélecteur de limite : **10 / 20 / 25 / 50** cartes (chips cliquables, valeur mémorisée pendant la session). Valeur par défaut : 20.
+  - Clic sur une carte → ouvre la modale de détail habituelle (modification de quantités incluse).
+- **Filtre "✦ Foil"** dans la barre de filtres de la collection : n'affiche que les cartes possédant au moins un exemplaire foilé (`foilQuantity > 0`). Combinable avec la recherche par nom et le filtre par édition.
+
+### Changed
+
+- `UserCollectionRepository` : ajout de la méthode `findRecentWithCard(Pageable)` avec `JOIN FETCH` sur `card` et `edition` — remplace l'ancienne `findTop15ByOrderByLastAddedAtDesc()` qui provoquait une `LazyInitializationException`.
+- `CollectionService` : méthode `getRecentCards(int limit)` avec validation de la valeur autorisée parmi `{10, 20, 25, 50}`.
+- `CollectionController` : endpoint `GET /api/collection/recent?limit=20` avec `@RequestParam(defaultValue = "20")`.
+- `app.js` : route `#/recent` → `renderRecentScansPage()` ; état `recentLimit` persisté en session ; cache `recentCardsState` mis à jour après chaque scan ajouté.
+
+### Fixed
+
+- `LazyInitializationException` sur `GET /api/collection/recent` : la requête JPQL utilise désormais `JOIN FETCH uc.card c LEFT JOIN FETCH c.edition` pour charger toutes les associations en une seule requête SQL.
+
+---
+
+## [2.2.0] — Amélioration du système Foil
 
 ### Added
 
@@ -49,6 +74,24 @@ et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 | Compatibilité | Utilise l'opérateur Elvis (`?:`) en JavaScript pour éviter les valeurs null |
 
 **Build Status** : ✅ `mvn clean compile` passe sans erreur, ✅ tous les tests unitaires réussissent
+
+
+---
+
+## [1.3.1] — 2026-05-18 — Migration Spring Boot 4
+
+### Changed
+
+- **Spring Boot** : migration de 3.x vers **4.0.6**.
+  - `spring-boot-starter-webflux` remplacé par `spring-boot-starter-webclient` (nouveau starter dédié en Spring Boot 4 pour l'auto-configuration du bean `WebClient.Builder`).
+  - Import `TestEntityManager` mis à jour : `org.springframework.boot.data.jpa.test.autoconfigure` → `org.springframework.boot.jpa.test.autoconfigure` (réorganisation des modules Spring Boot 4).
+  - Maven Surefire configuré avec `-javaagent: byte-buddy-agent` pour permettre à Mockito de fonctionner sous Java 25 (l'attachement dynamique d'agent est restreint depuis Java 21+).
+
+### Fixed
+
+- `MockitoInitializationException` : `byte-buddy-agent` chargé explicitement via `<argLine>` dans `maven-surefire-plugin` — résout l'erreur `net.bytebuddy.agent.Installer` introuvable sur Java 25.
+- `ApplicationContext` failure dans les tests d'intégration : absence du bean `WebClient$Builder` corrigée par l'ajout du starter `spring-boot-starter-webclient`.
+- Erreur de compilation `cannot find symbol TestEntityManager` dans `UserCollectionAuditTest` : import corrigé vers le nouveau package `org.springframework.boot.jpa.test.autoconfigure`.
 
 ---
 
