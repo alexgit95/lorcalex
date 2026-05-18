@@ -8,6 +8,8 @@ import com.alexgit95.repository.UserCollectionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -84,6 +86,15 @@ public class CollectionService {
 
     public List<CardDTO> getOwnedCards() {
         return collectionRepository.findAll().stream()
+                .map(uc -> cardService.toDTO(uc.getCard(), uc))
+                .collect(Collectors.toList());
+    }
+
+    private static final java.util.Set<Integer> ALLOWED_LIMITS = java.util.Set.of(10, 20, 25, 50);
+
+    public List<CardDTO> getRecentCards(int limit) {
+        int safeLimit = ALLOWED_LIMITS.contains(limit) ? limit : 20;
+        return collectionRepository.findRecentWithCard(PageRequest.of(0, safeLimit)).stream()
                 .map(uc -> cardService.toDTO(uc.getCard(), uc))
                 .collect(Collectors.toList());
     }

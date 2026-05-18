@@ -199,6 +199,7 @@ public class AdminController {
                     m.put("cardNumber", uc.getCard().getCardNumber());
                     m.put("editionCode", uc.getCard().getEdition() != null ? uc.getCard().getEdition().getCode() : null);
                     m.put("quantity", uc.getQuantity());
+                    m.put("foilQuantity", uc.getFoilQuantity() != null ? uc.getFoilQuantity() : 0);
                     m.put("foil", uc.getFoil() != null && uc.getFoil());
                     m.put("firstAddedAt", uc.getFirstAddedAt() != null ? uc.getFirstAddedAt().toString() : null);
                     m.put("lastAddedAt", uc.getLastAddedAt() != null ? uc.getLastAddedAt().toString() : null);
@@ -312,6 +313,7 @@ public class AdminController {
             UserCollection uc = new UserCollection();
             uc.setCard(card);
             uc.setQuantity(((Number) rawQty).intValue());
+            if (entry.get("foilQuantity") instanceof Number n) uc.setFoilQuantity(n.intValue());
             if (entry.get("foil") instanceof Boolean b) uc.setFoil(b);
             // Restore original dates so @PrePersist null-checks will not overwrite them
             if (entry.get("firstAddedAt") instanceof String s) {

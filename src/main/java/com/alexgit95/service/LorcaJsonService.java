@@ -8,7 +8,7 @@ import com.alexgit95.repository.AppSettingsRepository;
 import com.alexgit95.repository.CardRepository;
 import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -470,7 +470,7 @@ public class LorcaJsonService {
         if (inkwellObj != null) card.setInkable(Boolean.TRUE.equals(inkwellObj));
 
         Object costObj = c.get("cost");
-        if (costObj instanceof Number) card.setCost(((Number) costObj).intValue());
+        if (costObj instanceof Number number) card.setCost(number.intValue());
 
         Map<String, Object> images = (Map<String, Object>) c.get("images");
         if (images != null) {
@@ -515,7 +515,7 @@ public class LorcaJsonService {
             Object nameObj = setInfo.get("name");
             edition.setName(nameObj != null ? nameObj.toString() : "Set " + setCode);
             Object numObj = setInfo.get("number");
-            if (numObj instanceof Number) edition.setSetNumber(((Number) numObj).intValue());
+            if (numObj instanceof Number number) edition.setSetNumber(number.intValue());
             Object rdObj = setInfo.get("releaseDate");
             if (rdObj != null) edition.setReleaseDate(rdObj.toString());
         } else {

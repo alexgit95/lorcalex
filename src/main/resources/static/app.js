@@ -98,6 +98,14 @@ const api = {
 
   fullBackup: () => apiFetch('/admin/backup'),
   fullRestore: (data) => apiFetch('/admin/restore', { method: 'POST', body: JSON.stringify(data) }),
+
+  getRecentCards: (limit = 20) => apiFetch('/collection/recent?limit=' + limit),
+
+  listApiKeys: () => apiFetch('/admin/apikeys'),
+  createApiKey: (name, validityDays) =>
+    apiFetch('/admin/apikeys', { method: 'POST', body: JSON.stringify({ name, validityDays }) }),
+  deleteApiKey: (id) => apiFetch(`/admin/apikeys/${id}`, { method: 'DELETE' }),
+
   importCompanionCollection: (file, merge = true) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -155,11 +163,12 @@ function handleRoute() {
 
 function renderPage(page) {
   switch (page) {
-    case 'login':      renderLogin();      break;
-    case 'collection': renderCollection(); break;
-    case 'statistics': renderStatistics(); break;
-    case 'scanner':    renderScanner();    break;
-    case 'admin':      renderAdmin();      break;
+    case 'login':      renderLogin();           break;
+    case 'collection': renderCollection();      break;
+    case 'statistics': renderStatistics();      break;
+    case 'scanner':    renderScanner();         break;
+    case 'recent':     renderRecentScansPage(); break;
+    case 'admin':      renderAdmin();           break;
     default:           navigate('collection');
   }
 }
@@ -183,6 +192,9 @@ function navHTML(active) {
     ${item('scanner',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 6.5v3h-3v-3h3M11 5H5v6h6V5zm-1.5 9.5v3h-3v-3h3M11 13H5v6h6v-6zm6.5-6.5v3h-3v-3h3M19 5h-6v6h6V5zm-6 8h1.5v1.5H13V13zm1.5 1.5H16V16h-1.5v-1.5zM16 13h1.5v1.5H16V13zm-3 3h1.5v1.5H13V16zm1.5 1.5H16V19h-1.5v-1.5zM16 16h1.5v1.5H16V16zm1.5-1.5H19V16h-1.5v-1.5zm0 3H19V19h-1.5v-1.5zM22 7h-2V4h-3V2h5v5zm0 15v-5h-2v3h-3v2h5zM2 22h5v-2H4v-3H2v5zM2 2v5h2V4h3V2H2z"/></svg>`,
       'Scanner')}
+    ${item('recent',
+      `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v4l5-5-5-5v4z"/></svg>`,
+      'Récents')}
     ${item('admin',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>`,
       'Admin')}
@@ -206,6 +218,16 @@ function formatDate(isoStr) {
   const d = new Date(isoStr);
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
+
+function formatDateTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+let recentCardsState = [];
+let recentLimit = 20;
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
@@ -279,8 +301,8 @@ function renderCollection() {
         </div>
         <div id="editionBar" class="filter-bar">${loadingHTML('')}</div>
         <div id="filterBar" class="filter-bar">
-          ${['all','owned','missing'].map((k,i) =>
-            `<button class="filter-chip${collState.filter===k?' active':''}" data-filter="${k}">${['Toutes','Possédées','Manquantes'][i]}</button>`
+          ${['all','owned','missing','foil'].map((k,i) =>
+            `<button class="filter-chip${collState.filter===k?' active':''}" data-filter="${k}">${['Toutes','Possédées','Manquantes','✦ Foil'][i]}</button>`
           ).join('')}
         </div>
         <div class="search-bar">
@@ -373,6 +395,7 @@ function renderCards() {
   const filtered = cards.filter(c => {
     if (filter === 'owned' && !c.owned) return false;
     if (filter === 'missing' && c.owned) return false;
+    if (filter === 'foil' && !(c.foilQuantity > 0)) return false;
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -417,8 +440,90 @@ function cardItemHTML(card) {
   </div>`;
 }
 
+function recentCardItemHTML(card) {
+  const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
+  const totalQty = (card.quantity || 0) + (card.foilQuantity || 0);
+  const hasFoil = card.foilQuantity && card.foilQuantity > 0;
+  const scanDate = card.lastAddedAt ? formatDateTime(card.lastAddedAt) : '';
+  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}" data-id="${card.id}">
+    ${card.imageUrl
+      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
+    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : ''}
+    <div class="card-info">
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
+      <div class="card-name">${esc(card.name)}</div>
+      ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
+      ${scanDate ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">🕐 ${scanDate}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderRecentScansPage() {
+  document.getElementById('app').innerHTML = `
+    <div class="app">
+      <div class="page">
+        <div class="page-header"><h1>\uD83D\uDD50 Derniers scans</h1></div>
+        <div class="filter-bar" id="recentLimitBar">
+          ${[10, 20, 25, 50].map(n =>
+            `<button class="filter-chip${recentLimit === n ? ' active' : ''}" data-limit="${n}">${n} cartes</button>`
+          ).join('')}
+        </div>
+        <div id="recentScansArea">${loadingHTML()}</div>
+      </div>
+      ${navHTML('recent')}
+    </div>
+    <div id="modalArea"></div>`;
+
+  document.getElementById('recentLimitBar').addEventListener('click', e => {
+    const btn = e.target.closest('[data-limit]');
+    if (!btn) return;
+    recentLimit = parseInt(btn.dataset.limit);
+    document.querySelectorAll('#recentLimitBar .filter-chip').forEach(b =>
+      b.classList.toggle('active', parseInt(b.dataset.limit) === recentLimit)
+    );
+    const area = document.getElementById('recentScansArea');
+    if (area) area.innerHTML = loadingHTML('');
+    api.getRecentCards(recentLimit).then(cards => {
+      recentCardsState = cards || [];
+      renderRecentScansSection();
+    }).catch(() => {
+      const el = document.getElementById('recentScansArea');
+      if (el) el.innerHTML = `<div class="empty-state"><h3>Erreur</h3><p>Impossible de charger les derniers scans.</p></div>`;
+    });
+  });
+
+  api.getRecentCards(recentLimit).then(cards => {
+    recentCardsState = cards || [];
+    renderRecentScansSection();
+  }).catch(() => {
+    const el = document.getElementById('recentScansArea');
+    if (el) el.innerHTML = `<div class="empty-state"><h3>Erreur</h3><p>Impossible de charger les derniers scans.</p></div>`;
+  });
+}
+
+function renderRecentScansSection() {
+  const area = document.getElementById('recentScansArea');
+  if (!area) return;
+  if (recentCardsState.length === 0) {
+    area.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v4l5-5-5-5v4z"/></svg>
+      <h3>Aucune carte scannée</h3>
+      <p>Les 15 dernières cartes ajoutées apparaîtront ici.</p>
+    </div>`;
+    return;
+  }
+  area.innerHTML = `<div class="cards-grid">${recentCardsState.map(c => recentCardItemHTML(c)).join('')}</div>`;
+  area.querySelectorAll('.card-item').forEach(el => {
+    el.addEventListener('click', () => openModal(parseInt(el.dataset.id)));
+  });
+}
+
 function openModal(cardId) {
-  const card = collState.cards.find(c => c.id === cardId);
+  const card = collState.cards.find(c => c.id === cardId)
+             || recentCardsState.find(c => c.id === cardId);
   if (!card) return;
   collState.modal = card;
 
@@ -650,9 +755,11 @@ async function updateQty(cardId, qty) {
 }
 
 async function updateQtyRegular(cardId, qty) {
-  const card = collState.cards.find(c => c.id === cardId);
-  if (!card) return;
-  const foilQty = card.foilQuantity || 0;
+  const sourceCard = collState.cards.find(c => c.id === cardId)
+                  || (collState.modal?.id === cardId ? collState.modal : null)
+                  || recentCardsState.find(c => c.id === cardId);
+  if (!sourceCard) return;
+  const foilQty = sourceCard.foilQuantity || 0;
   let updated;
   if (qty <= 0 && foilQty <= 0) {
     updated = await api.removeFromCollection(cardId);
@@ -660,15 +767,19 @@ async function updateQtyRegular(cardId, qty) {
     updated = await api.updateQuantity(cardId, qty, foilQty);
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
+  renderRecentScansSection();
   openModal(cardId);
 }
 
 async function updateQtyFoiled(cardId, qty) {
-  const card = collState.cards.find(c => c.id === cardId);
-  if (!card) return;
-  const regQty = card.quantity || 0;
+  const sourceCard = collState.cards.find(c => c.id === cardId)
+                  || (collState.modal?.id === cardId ? collState.modal : null)
+                  || recentCardsState.find(c => c.id === cardId);
+  if (!sourceCard) return;
+  const regQty = sourceCard.quantity || 0;
   let updated;
   if (regQty <= 0 && qty <= 0) {
     updated = await api.removeFromCollection(cardId);
@@ -676,8 +787,10 @@ async function updateQtyFoiled(cardId, qty) {
     updated = await api.updateQuantity(cardId, regQty, qty);
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
+  renderRecentScansSection();
   openModal(cardId);
 }
 
@@ -991,8 +1104,7 @@ function parseCardCode(rawText) {
   const cardNum = parseInt(m[1], 10);
   const total   = parseInt(m[2], 10);
   if (cardNum < 1 || cardNum > 999) return null;
-  if (total   < 2  || total   > 400) return null;
-  if (cardNum > total)               return null;
+  if (total   < 2  || total   > 500) return null;
   const after  = text.slice(text.indexOf(m[0]) + m[0].length);
   const langM  = after.match(/\b([A-Z]{2})\b/);
   let setNum = null;
@@ -1317,6 +1429,8 @@ async function autoAddCard(card, foil = false) {
   setScanAlert(`✓ "${updated.name}" quantité mise à jour (×${updated.quantity + updated.foilQuantity})`, 'success');
   playBeep(880, 200);
   navigator.vibrate?.([100, 50, 100]);
+  // Rafraîchit le cache récents (mis à jour à la prochaine visite de l'onglet Récents)
+  api.getRecentCards(recentLimit).then(cards => { recentCardsState = cards || []; }).catch(() => {});
   return updated;
 }
 
@@ -1607,6 +1721,46 @@ function renderAdmin() {
         <div id="statsSetsResult" style="margin-top:8px"></div>
       </div>
 
+      <!-- API Keys -->
+      <details id="apiKeysSection" class="edition-item" style="margin-bottom:12px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:4px 0;list-style:none;user-select:none">
+          <span style="font-size:1.15rem">🔑</span>
+          <h3 style="margin:0;flex:1">Clés API</h3>
+          <span id="apiKeysSummaryCount" style="font-size:.8rem;color:var(--text-muted)"></span>
+          <svg style="width:18px;height:18px;flex-shrink:0;transition:transform .2s;transform:rotate(0deg)" id="apiKeyChevron" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+        </summary>
+
+        <div style="margin-top:12px">
+          <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+            Générez des clés pour accéder à l'export de la collection via
+            <code style="font-size:.8rem;background:var(--bg-card2);padding:2px 5px;border-radius:4px">GET /api/export?apiKey=…</code>
+            sans authentification JWT.
+          </p>
+
+          <!-- Création -->
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;padding:10px;background:var(--bg-card2);border-radius:10px">
+            <div style="font-size:.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Nouvelle clé API</div>
+            <input type="text" id="apiKeyName" placeholder="Nom de la clé (ex : Home Assistant)"
+              style="border-radius:8px;font-size:.88rem" maxlength="80" />
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="apiKeyValidity" style="border-radius:8px;font-size:.88rem;flex:1;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+                <option value="7">7 jours</option>
+                <option value="30" selected>30 jours</option>
+                <option value="90">90 jours</option>
+                <option value="180">180 jours</option>
+                <option value="365">1 an</option>
+                <option value="3650">10 ans</option>
+              </select>
+              <button class="btn btn-accent" id="createApiKeyBtn" style="flex-shrink:0">Générer</button>
+            </div>
+            <div id="apiKeyNewResult"></div>
+          </div>
+
+          <!-- Tableau des clés existantes -->
+          <div id="apiKeysList"></div>
+        </div>
+      </details>
+
       <!-- Paramètres -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Paramètres</h3>
@@ -1632,6 +1786,106 @@ function renderAdmin() {
     if (progressData.running) {
       setSyncBusy(true);
       startSyncPoll();
+    }
+
+    // ── API Keys ──────────────────────────────────────────────────────────
+    const apiKeysSection = document.getElementById('apiKeysSection');
+    if (apiKeysSection) {
+      apiKeysSection.addEventListener('toggle', () => {
+        const chevron = document.getElementById('apiKeyChevron');
+        if (chevron) chevron.style.transform = apiKeysSection.open ? 'rotate(180deg)' : 'rotate(0deg)';
+        if (apiKeysSection.open) loadApiKeysList();
+      });
+    }
+
+    document.getElementById('createApiKeyBtn').addEventListener('click', async () => {
+      const name = document.getElementById('apiKeyName').value.trim();
+      const validityDays = parseInt(document.getElementById('apiKeyValidity').value, 10);
+      const resultEl = document.getElementById('apiKeyNewResult');
+      if (!name) {
+        resultEl.innerHTML = `<div class="alert alert-error" style="padding:6px 10px;font-size:.82rem">Le nom est obligatoire.</div>`;
+        return;
+      }
+      try {
+        const res = await api.createApiKey(name, validityDays);
+        const key = res.key;
+        resultEl.innerHTML = `
+          <div class="alert alert-success" style="padding:8px 10px;font-size:.82rem">
+            <div style="font-weight:700;margin-bottom:6px">✅ Clé créée ! Copiez-la maintenant, elle ne sera plus visible.</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <code id="newApiKeyValue" style="background:var(--bg-card2);padding:4px 8px;border-radius:6px;font-size:.78rem;word-break:break-all;flex:1">${esc(key)}</code>
+              <button class="btn btn-ghost" style="padding:4px 10px;font-size:.78rem;flex-shrink:0" id="copyNewApiKeyBtn">📋 Copier</button>
+            </div>
+          </div>`;
+        document.getElementById('copyNewApiKeyBtn').addEventListener('click', () => {
+          navigator.clipboard.writeText(key).then(() => {
+            document.getElementById('copyNewApiKeyBtn').textContent = '✅ Copié';
+            setTimeout(() => { const b = document.getElementById('copyNewApiKeyBtn'); if (b) b.textContent = '📋 Copier'; }, 2000);
+          });
+        });
+        document.getElementById('apiKeyName').value = '';
+        loadApiKeysList();
+      } catch (err) {
+        resultEl.innerHTML = `<div class="alert alert-error" style="padding:6px 10px;font-size:.82rem">Erreur : ${esc(err.message)}</div>`;
+      }
+    });
+
+    async function loadApiKeysList() {
+      const listEl = document.getElementById('apiKeysList');
+      if (!listEl) return;
+      try {
+        const keys = await api.listApiKeys();
+        const countEl = document.getElementById('apiKeysSummaryCount');
+        if (countEl) countEl.textContent = keys.length > 0 ? `(${keys.length})` : '';
+        if (keys.length === 0) {
+          listEl.innerHTML = `<p style="font-size:.85rem;color:var(--text-muted);text-align:center;padding:10px 0">Aucune clé API.</p>`;
+          return;
+        }
+        listEl.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:.8rem">
+            <thead>
+              <tr style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">
+                <th style="text-align:left;padding:4px 6px">Nom</th>
+                <th style="text-align:left;padding:4px 6px">Préfixe</th>
+                <th style="text-align:left;padding:4px 6px">Expiration</th>
+                <th style="text-align:left;padding:4px 6px">Dernière util.</th>
+                <th style="padding:4px 6px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${keys.map(k => {
+                const expired = k.expired;
+                const rowStyle = expired ? 'background:rgba(211,47,47,.12);color:var(--danger,#e57373)' : '';
+                const expDate = k.expiresAt ? k.expiresAt.replace('T', ' ').slice(0, 16) : '—';
+                const lastUsed = k.lastUsedAt ? k.lastUsedAt.replace('T', ' ').slice(0, 16) : '—';
+                return `<tr style="${rowStyle};border-bottom:1px solid var(--border)">
+                  <td style="padding:6px 6px;font-weight:600">${esc(k.name)}${expired ? ' <span style="font-size:.68rem;font-weight:700;color:var(--danger,#e57373)">[EXPIRÉE]</span>' : ''}</td>
+                  <td style="padding:6px 6px;font-family:monospace">${esc(k.keyPrefix)}…</td>
+                  <td style="padding:6px 6px">${esc(expDate)}</td>
+                  <td style="padding:6px 6px">${esc(lastUsed)}</td>
+                  <td style="padding:6px 6px;text-align:right">
+                    <button class="btn btn-ghost" data-delete-key="${k.id}" style="padding:3px 8px;font-size:.75rem;color:var(--danger,#e57373)">🗑 Supprimer</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+        listEl.querySelectorAll('[data-delete-key]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = parseInt(btn.dataset.deleteKey, 10);
+            const keyName = btn.closest('tr').querySelector('td:first-child').textContent.trim();
+            if (!confirm(`Supprimer la clé "${keyName}" ?`)) return;
+            try {
+              await api.deleteApiKey(id);
+              loadApiKeysList();
+            } catch (err) {
+              alert('Erreur suppression : ' + err.message);
+            }
+          });
+        });
+      } catch (err) {
+        listEl.innerHTML = `<div class="alert alert-error" style="padding:6px 10px;font-size:.82rem">Erreur chargement : ${esc(err.message)}</div>`;
+      }
     }
 
     // ── Stats sets filter ─────────────────────────────────────────────────

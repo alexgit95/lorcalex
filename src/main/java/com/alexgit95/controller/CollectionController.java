@@ -23,6 +23,12 @@ public class CollectionController {
         return ResponseEntity.ok(collectionService.getOwnedCards());
     }
 
+    @GetMapping("/recent")
+    public ResponseEntity<List<CardDTO>> getRecentCards(
+            @RequestParam(defaultValue = "20") int limit) {
+        return ResponseEntity.ok(collectionService.getRecentCards(limit));
+    }
+
     @PostMapping
     public ResponseEntity<CardDTO> addCard(@RequestBody Map<String, Object> body) {
         Long cardId = Long.parseLong(String.valueOf(body.get("cardId")));
