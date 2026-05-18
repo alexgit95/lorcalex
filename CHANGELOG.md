@@ -8,6 +8,15 @@ et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
 ---
 
+## [2.3.2] — Correction scanner cartes enchantées
+
+### Fixed
+
+- **Scanner OCR** : les cartes dont le numéro dépasse le total imprimé (cartes enchantées, ex. `205/204`) étaient rejetées silencieusement par la validation `cardNum > total`. Cette contrainte est supprimée.
+- Borne maximale du champ `total` relevée de 400 à 500 pour anticiper les grands sets futurs.
+
+---
+
 ## [2.3.1] — Correction sauvegarde/restauration Foil
 
 ### Fixed
