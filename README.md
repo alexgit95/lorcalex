@@ -210,6 +210,51 @@ Toutes les routes nécessitent un Bearer JWT (sauf `/api/auth/login`).
 | `GET` | `/api/admin/backup` | Sauvegarde complète (éditions + cartes + collection + paramètres) |
 | `POST` | `/api/admin/restore` | Restauration complète depuis une sauvegarde |
 | `POST` | `/api/admin/import/companion?merge=true\|false` | Import Companion (asynchrone) avec mode fusion/remplacement |
+| `GET` | `/api/admin/apikeys` | Liste des clés API (JWT requis) |
+| `POST` | `/api/admin/apikeys` | Créer une clé API (JWT requis) |
+| `DELETE` | `/api/admin/apikeys/{id}` | Supprimer une clé API (JWT requis) |
+| `GET` | `/api/export?apiKey=…` | **Export public** de la collection (clé API uniquement, pas de JWT) |
+
+---
+
+## Clés API & Export programmable
+
+### Principe
+
+Le endpoint `GET /api/export?apiKey=<clé>` retourne le même payload JSON que la sauvegarde complète, mais **sans authentification JWT** — uniquement via une **clé API** générée depuis l'administration.
+
+Cela permet d'accéder à la collection depuis un outil externe (Home Assistant, script Python, etc.) sans exposer le mot de passe ou le JWT.
+
+### Sécurité
+
+- La clé en clair n'est **jamais stockée** : seul son hash SHA-256 est conservé en base.
+- La valeur en clair est affichée **une seule fois** lors de la création — à sauvegarder immédiatement.
+- Chaque clé a une **date d'expiration** (7 j / 30 j / 90 j / 180 j / 1 an / 10 ans).
+- Une clé expirée cesse immédiatement de fonctionner.
+- La **dernière utilisation réussie** est enregistrée pour chaque clé.
+
+### Créer une clé API
+
+1. Ouvrir **Administration → 🔑 Clés API** (section dépliable).
+2. Saisir un **nom** descriptif (ex : "Home Assistant") et choisir una **durée de validité**.
+3. Cliquer **Générer** — la clé en clair s'affiche une seule fois avec un bouton **Copier**.
+
+### Utiliser la clé
+
+```bash
+curl "http://localhost:8181/api/export?apiKey=<votre_clé>"
+```
+
+### Gérer les clés
+
+Le tableau de la section **Clés API** affiche pour chaque clé :
+- Son **nom**
+- Son **préfixe** (8 premiers caractères, pour identification)
+- Sa **date d'expiration** (ligne rouge si expirée)
+- La **dernière utilisation** réussie
+- Un bouton **Supprimer**
+
+
 
 ---
 

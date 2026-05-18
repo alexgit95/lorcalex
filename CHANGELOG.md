@@ -8,6 +8,35 @@ et ce projet respecte la [Versioning Sémantique](https://semver.org/lang/fr/).
 
 ---
 
+## [2.3.0] — Clés API & Export programmable
+
+### Added
+
+- **Clés API** : génération de clés API depuis la page Administration pour accéder à un endpoint d'export sans JWT.
+  - Chaque clé dispose d'un **nom** descriptif, d'une **durée de validité** choisie (7 j / 30 j / 90 j / 180 j / 1 an / 10 ans) et d'une **date d'expiration**.
+  - La clé en clair est affichée **une seule fois** à la création, avec un bouton **Copier** ; seul son hash SHA-256 est persisté.
+  - **Dernière utilisation** : `lastUsedAt` est mis à jour à chaque appel réussi.
+- **Endpoint `GET /api/export?apiKey=<clé>`** : retourne le même payload JSON que la sauvegarde complète (éditions + cartes + collection + paramètres), accessible sans authentification JWT — par clé API uniquement.
+- **Section "Clés API" dans l'Administration** : panneau dépliable (accordéon `<details>`) avec :
+  - Formulaire de création (nom + durée).
+  - Tableau des clés existantes : nom, préfixe (8 premiers caractères), date d'expiration, dernière utilisation.
+  - **Ligne rouge** pour les clés expirées.
+  - Bouton **Supprimer** par clé.
+- **Modèle `ApiKey`** : entité JPA (`id`, `name`, `keyHash`, `keyPrefix`, `expiresAt`, `lastUsedAt`, `createdAt`).
+- **`ApiKeyRepository`** : `findByKeyHash(String)`.
+- **`ApiKeyService`** : `generateKey`, `validateAndTouch`, `listKeys`, `deleteKey`, `sha256` (package-visible pour les tests).
+- **`ApiKeyAuthFilter`** : `OncePerRequestFilter` branché avant `JwtAuthenticationFilter` — intercepte `/api/export`, valide la clé et positionne l'authentification dans le `SecurityContext`.
+- **`ApiKeyController`** : `GET /api/admin/apikeys`, `POST /api/admin/apikeys`, `DELETE /api/admin/apikeys/{id}` (JWT requis).
+- **`ExportController`** : `GET /api/export` (authentifié via `ApiKeyAuthFilter`).
+- **Tests unitaires `ApiKeyServiceTest`** : génération, validation (valide/expirée/inconnue/null), `lastUsedAt`, listing, suppression, SHA-256 déterministe.
+- **Tests d'intégration `ApiKeyExportIntegrationTest`** : 200 avec clé valide, 403 sans clé / clé incorrecte / clé expirée, mise à jour de `lastUsedAt`.
+
+### Changed
+
+- `SecurityConfig` : injection de `ApiKeyAuthFilter` et ajout avant `UsernamePasswordAuthenticationFilter`.
+
+
+
 ## [2.2.0] — Onglet Derniers scans & filtre Foil
 
 ### Added

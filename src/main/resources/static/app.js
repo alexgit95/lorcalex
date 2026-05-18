@@ -101,6 +101,11 @@ const api = {
 
   getRecentCards: (limit = 20) => apiFetch('/collection/recent?limit=' + limit),
 
+  listApiKeys: () => apiFetch('/admin/apikeys'),
+  createApiKey: (name, validityDays) =>
+    apiFetch('/admin/apikeys', { method: 'POST', body: JSON.stringify({ name, validityDays }) }),
+  deleteApiKey: (id) => apiFetch(`/admin/apikeys/${id}`, { method: 'DELETE' }),
+
   importCompanionCollection: (file, merge = true) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -1717,6 +1722,46 @@ function renderAdmin() {
         <div id="statsSetsResult" style="margin-top:8px"></div>
       </div>
 
+      <!-- API Keys -->
+      <details id="apiKeysSection" class="edition-item" style="margin-bottom:12px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:4px 0;list-style:none;user-select:none">
+          <span style="font-size:1.15rem">🔑</span>
+          <h3 style="margin:0;flex:1">Clés API</h3>
+          <span id="apiKeysSummaryCount" style="font-size:.8rem;color:var(--text-muted)"></span>
+          <svg style="width:18px;height:18px;flex-shrink:0;transition:transform .2s;transform:rotate(0deg)" id="apiKeyChevron" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+        </summary>
+
+        <div style="margin-top:12px">
+          <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+            Générez des clés pour accéder à l'export de la collection via
+            <code style="font-size:.8rem;background:var(--bg-card2);padding:2px 5px;border-radius:4px">GET /api/export?apiKey=…</code>
+            sans authentification JWT.
+          </p>
+
+          <!-- Création -->
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;padding:10px;background:var(--bg-card2);border-radius:10px">
+            <div style="font-size:.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Nouvelle clé API</div>
+            <input type="text" id="apiKeyName" placeholder="Nom de la clé (ex : Home Assistant)"
+              style="border-radius:8px;font-size:.88rem" maxlength="80" />
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="apiKeyValidity" style="border-radius:8px;font-size:.88rem;flex:1;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+                <option value="7">7 jours</option>
+                <option value="30" selected>30 jours</option>
+                <option value="90">90 jours</option>
+                <option value="180">180 jours</option>
+                <option value="365">1 an</option>
+                <option value="3650">10 ans</option>
+              </select>
+              <button class="btn btn-accent" id="createApiKeyBtn" style="flex-shrink:0">Générer</button>
+            </div>
+            <div id="apiKeyNewResult"></div>
+          </div>
+
+          <!-- Tableau des clés existantes -->
+          <div id="apiKeysList"></div>
+        </div>
+      </details>
+
       <!-- Paramètres -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Paramètres</h3>
@@ -1742,6 +1787,106 @@ function renderAdmin() {
     if (progressData.running) {
       setSyncBusy(true);
       startSyncPoll();
+    }
+
+    // ── API Keys ──────────────────────────────────────────────────────────
+    const apiKeysSection = document.getElementById('apiKeysSection');
+    if (apiKeysSection) {
+      apiKeysSection.addEventListener('toggle', () => {
+        const chevron = document.getElementById('apiKeyChevron');
+        if (chevron) chevron.style.transform = apiKeysSection.open ? 'rotate(180deg)' : 'rotate(0deg)';
+        if (apiKeysSection.open) loadApiKeysList();
+      });
+    }
+
+    document.getElementById('createApiKeyBtn').addEventListener('click', async () => {
+      const name = document.getElementById('apiKeyName').value.trim();
+      const validityDays = parseInt(document.getElementById('apiKeyValidity').value, 10);
+      const resultEl = document.getElementById('apiKeyNewResult');
+      if (!name) {
+        resultEl.innerHTML = `<div class="alert alert-error" style="padding:6px 10px;font-size:.82rem">Le nom est obligatoire.</div>`;
+        return;
+      }
+      try {
+        const res = await api.createApiKey(name, validityDays);
+        const key = res.key;
+        resultEl.innerHTML = `
+          <div class="alert alert-success" style="padding:8px 10px;font-size:.82rem">
+            <div style="font-weight:700;margin-bottom:6px">✅ Clé créée ! Copiez-la maintenant, elle ne sera plus visible.</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <code id="newApiKeyValue" style="background:var(--bg-card2);padding:4px 8px;border-radius:6px;font-size:.78rem;word-break:break-all;flex:1">${esc(key)}</code>
+              <button class="btn btn-ghost" style="padding:4px 10px;font-size:.78rem;flex-shrink:0" id="copyNewApiKeyBtn">📋 Copier</button>
+            </div>
+          </div>`;
+        document.getElementById('copyNewApiKeyBtn').addEventListener('click', () => {
+          navigator.clipboard.writeText(key).then(() => {
+            document.getElementById('copyNewApiKeyBtn').textContent = '✅ Copié';
+            setTimeout(() => { const b = document.getElementById('copyNewApiKeyBtn'); if (b) b.textContent = '📋 Copier'; }, 2000);
+          });
+        });
+        document.getElementById('apiKeyName').value = '';
+        loadApiKeysList();
+      } catch (err) {
+        resultEl.innerHTML = `<div class="alert alert-error" style="padding:6px 10px;font-size:.82rem">Erreur : ${esc(err.message)}</div>`;
+      }
+    });
+
+    async function loadApiKeysList() {
+      const listEl = document.getElementById('apiKeysList');
+      if (!listEl) return;
+      try {
+        const keys = await api.listApiKeys();
+        const countEl = document.getElementById('apiKeysSummaryCount');
+        if (countEl) countEl.textContent = keys.length > 0 ? `(${keys.length})` : '';
+        if (keys.length === 0) {
+          listEl.innerHTML = `<p style="font-size:.85rem;color:var(--text-muted);text-align:center;padding:10px 0">Aucune clé API.</p>`;
+          return;
+        }
+        listEl.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:.8rem">
+            <thead>
+              <tr style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">
+                <th style="text-align:left;padding:4px 6px">Nom</th>
+                <th style="text-align:left;padding:4px 6px">Préfixe</th>
+                <th style="text-align:left;padding:4px 6px">Expiration</th>
+                <th style="text-align:left;padding:4px 6px">Dernière util.</th>
+                <th style="padding:4px 6px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${keys.map(k => {
+                const expired = k.expired;
+                const rowStyle = expired ? 'background:rgba(211,47,47,.12);color:var(--danger,#e57373)' : '';
+                const expDate = k.expiresAt ? k.expiresAt.replace('T', ' ').slice(0, 16) : '—';
+                const lastUsed = k.lastUsedAt ? k.lastUsedAt.replace('T', ' ').slice(0, 16) : '—';
+                return `<tr style="${rowStyle};border-bottom:1px solid var(--border)">
+                  <td style="padding:6px 6px;font-weight:600">${esc(k.name)}${expired ? ' <span style="font-size:.68rem;font-weight:700;color:var(--danger,#e57373)">[EXPIRÉE]</span>' : ''}</td>
+                  <td style="padding:6px 6px;font-family:monospace">${esc(k.keyPrefix)}…</td>
+                  <td style="padding:6px 6px">${esc(expDate)}</td>
+                  <td style="padding:6px 6px">${esc(lastUsed)}</td>
+                  <td style="padding:6px 6px;text-align:right">
+                    <button class="btn btn-ghost" data-delete-key="${k.id}" style="padding:3px 8px;font-size:.75rem;color:var(--danger,#e57373)">🗑 Supprimer</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+        listEl.querySelectorAll('[data-delete-key]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = parseInt(btn.dataset.deleteKey, 10);
+            const keyName = btn.closest('tr').querySelector('td:first-child').textContent.trim();
+            if (!confirm(`Supprimer la clé "${keyName}" ?`)) return;
+            try {
+              await api.deleteApiKey(id);
+              loadApiKeysList();
+            } catch (err) {
+              alert('Erreur suppression : ' + err.message);
+            }
+          });
+        });
+      } catch (err) {
+        listEl.innerHTML = `<div class="alert alert-error" style="padding:6px 10px;font-size:.82rem">Erreur chargement : ${esc(err.message)}</div>`;
+      }
     }
 
     // ── Stats sets filter ─────────────────────────────────────────────────
