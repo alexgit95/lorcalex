@@ -1,5 +1,6 @@
 package com.alexgit95.config;
 
+import com.alexgit95.security.ApiKeyAuthFilter;
 import com.alexgit95.security.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,9 +24,12 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private final ApiKeyAuthFilter apiKeyAuthFilter;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public SecurityConfig(ApiKeyAuthFilter apiKeyAuthFilter,
+                          JwtAuthenticationFilter jwtAuthenticationFilter) {
+        this.apiKeyAuthFilter = apiKeyAuthFilter;
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     }
 
@@ -39,9 +43,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/health").permitAll()
-                // /api/export is permitted at the security level; API key validation
-                // is performed inside ExportController itself.
-                .requestMatchers("/api/export").permitAll()
+                .requestMatchers("/api/export").hasRole("API")
                 .requestMatchers(
                         "/", "/index.html",
                         "/login", "/statistics", "/scanner", "/admin",
@@ -52,6 +54,7 @@ public class SecurityConfig {
                 ).permitAll()
                 .anyRequest().authenticated()
             )
+            .addFilterBefore(apiKeyAuthFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

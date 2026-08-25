@@ -123,9 +123,11 @@ public class CardService {
             dto.setEditionCode(card.getEdition().getCode());
             dto.setEditionSetNumber(card.getEdition().getSetNumber());
         }
-        dto.setOwned(uc != null);
-        dto.setQuantity(uc != null ? uc.getQuantity() : 0);
-        dto.setFoilQuantity(uc != null ? uc.getFoilQuantity() : 0);
+        int quantity = uc != null && uc.getQuantity() != null ? uc.getQuantity() : 0;
+        int foilQuantity = uc != null && uc.getFoilQuantity() != null ? uc.getFoilQuantity() : 0;
+        dto.setOwned(quantity > 0 || foilQuantity > 0);
+        dto.setQuantity(quantity);
+        dto.setFoilQuantity(foilQuantity);
         dto.setFoil(uc != null && Boolean.TRUE.equals(uc.getFoil()));
         dto.setFirstAddedAt(uc != null ? uc.getFirstAddedAt() : null);
         dto.setLastAddedAt(uc != null ? uc.getLastAddedAt() : null);

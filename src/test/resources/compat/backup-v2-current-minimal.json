@@ -1,0 +1,57 @@
+{
+  "backupDate": "2026-08-25T12:00:00",
+  "version": "2",
+  "totalEditions": 1,
+  "totalCards": 1,
+  "totalCollection": 1,
+  "editions": [
+    {
+      "id": 1,
+      "code": "TFC",
+      "name": "Premier Chapitre",
+      "totalCards": 1,
+      "releaseDate": "2023-09-01",
+      "logoUrl": null,
+      "setNumber": 1
+    }
+  ],
+  "cards": [
+    {
+      "externalId": "compat-ext-1",
+      "cardNumber": 1,
+      "editionCode": "TFC",
+      "name": "Compat Card",
+      "rarity": "Rare",
+      "cost": 2,
+      "inkColor": "Ambre",
+      "type": "Personnage",
+      "subtypes": "Héros",
+      "bodyText": "",
+      "flavorText": "",
+      "imageUrl": null,
+      "thumbnailUrl": null,
+      "artist": "Compat Artist",
+      "inkable": true,
+      "imageHash": null
+    }
+  ],
+  "collection": [
+    {
+      "externalId": "compat-ext-1",
+      "cardNumber": 1,
+      "editionCode": "TFC",
+      "quantity": 0,
+      "foilQuantity": 1,
+      "foil": true,
+      "firstAddedAt": "2026-08-24T10:00:00",
+      "lastAddedAt": "2026-08-25T10:00:00"
+    }
+  ],
+  "settings": [
+    {
+      "key": "stats_enabled_sets",
+      "value": "1",
+      "description": "Compat fixture"
+    }
+  ]
+}

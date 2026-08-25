@@ -81,15 +81,22 @@ public class LorcaJsonService {
         public final String message;
         public final boolean running;
         public final boolean error;
+        public final Map<String, Object> details;
 
         public ProgressInfo(String phase, int current, int total, String message,
                             boolean running, boolean error) {
+            this(phase, current, total, message, running, error, null);
+        }
+
+        public ProgressInfo(String phase, int current, int total, String message,
+                            boolean running, boolean error, Map<String, Object> details) {
             this.phase = phase;
             this.current = current;
             this.total = total;
             this.message = message;
             this.running = running;
             this.error = error;
+            this.details = details;
         }
 
         public int percent() {
@@ -105,6 +112,9 @@ public class LorcaJsonService {
             m.put("message", message);
             m.put("running", running);
             m.put("error", error);
+            if (details != null && !details.isEmpty()) {
+                m.put("details", details);
+            }
             return m;
         }
 
@@ -407,7 +417,14 @@ public class LorcaJsonService {
             message += " Vérifiez que le catalogue a été re-synchronisé avec la dernière version LorcaJson.";
         }
 
-        progress.set(new ProgressInfo("done", total, total, message, false, false));
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("importMode", modeLabel);
+        details.put("imported", imported);
+        details.put("skippedUnknown", skippedUnknown);
+        details.put("skippedInvalidRows", skippedInvalidRows);
+        details.put("skippedTotal", skippedUnknown + skippedInvalidRows);
+
+        progress.set(new ProgressInfo("done", total, total, message, false, false, details));
     }
 
     // ─── Card entity processing ───────────────────────────────────────────────

@@ -1090,6 +1090,26 @@ function canvasToBlob(canvas) {
 
 // ── Parsing du code Lorcana ───────────────────────────────────────────────────
 // Format : "N/TOTAL • LANG • SET"  ex : "1/204 • FR • 4"
+const DEFAULT_SCANNER_TOTAL_MAX = 500;
+let scannerTotalMax = DEFAULT_SCANNER_TOTAL_MAX;
+
+async function loadScannerSettings() {
+  try {
+    const settings = await api.getSettings();
+    const row = (settings || []).find(s => s.settingKey === 'scanner_total_max');
+    if (!row || row.settingValue == null) {
+      scannerTotalMax = DEFAULT_SCANNER_TOTAL_MAX;
+      return;
+    }
+    const parsed = parseInt(String(row.settingValue), 10);
+    scannerTotalMax = Number.isFinite(parsed) && parsed >= 2 && parsed <= 999
+      ? parsed
+      : DEFAULT_SCANNER_TOTAL_MAX;
+  } catch {
+    scannerTotalMax = DEFAULT_SCANNER_TOTAL_MAX;
+  }
+}
+
 function parseCardCode(rawText) {
   const text = rawText
     .toUpperCase()
@@ -1104,7 +1124,7 @@ function parseCardCode(rawText) {
   const cardNum = parseInt(m[1], 10);
   const total   = parseInt(m[2], 10);
   if (cardNum < 1 || cardNum > 999) return null;
-  if (total   < 2  || total   > 500) return null;
+  if (total   < 2  || total   > scannerTotalMax) return null;
   const after  = text.slice(text.indexOf(m[0]) + m[0].length);
   const langM  = after.match(/\b([A-Z]{2})\b/);
   let setNum = null;
@@ -1242,9 +1262,9 @@ function renderScanner() {
     </div>`;
 
   const cameraArea = document.getElementById('scanCameraArea');
-  navigator.mediaDevices?.getUserMedia({
+  loadScannerSettings().then(() => navigator.mediaDevices?.getUserMedia({
     video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-  })
+  }))
     .then(stream => {
       _cameraStream = stream;
       cameraArea.innerHTML = `
@@ -1693,7 +1713,7 @@ function renderAdmin() {
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Import depuis Lorcana Companion</h3>
         <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
-          Importez un export Companion (clé <strong>OwnedCardQuantitiesV2</strong>). Les quantités Regular et Foiled sont additionnées.
+          Importez un export Companion (clé <strong>OwnedCardQuantitiesV2</strong>). Les quantités Regular et Foiled sont traitées séparément, en mode fusion ou remplacement.
         </p>
         <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--text-muted);margin:0 0 10px;cursor:pointer">
           <input type="checkbox" id="companionMergeMode" checked style="accent-color:var(--accent)" />

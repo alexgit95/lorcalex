@@ -304,7 +304,24 @@ Les entrées `Regular` et `Foiled` d'une même carte sont distinguées et stock�
 
 L'import est asynchrone. La barre de progression dans l'Administration affiche les phases `📄 Analyse Companion` → `📥 Import Companion` → `✅ Terminé` / `❌ Erreur`.
 
+En fin d'import, le statut expose aussi un bloc structuré `details` contenant au minimum :
+- `importMode` (`fusion` ou `remplacement`)
+- `imported`
+- `skippedUnknown`
+- `skippedInvalidRows`
+- `skippedTotal`
+
 > **Pré-requis :** le mapping Companion repose sur l'`externalId`. Si de nombreuses cartes sont introuvables, relancer d'abord une synchronisation LorcaJson.
+
+---
+
+## Scanner OCR - borne configurable
+
+La validation du format OCR `N/TOTAL • FR • SET` utilise désormais une borne `TOTAL` configurable via le setting `scanner_total_max`.
+
+- Valeur par défaut : `500`
+- Fallback : si la valeur est absente ou invalide, l'application revient à `500`
+- Plage acceptée : `2..999`
 
 ---
 
@@ -347,7 +364,28 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 
 - JWT stateless (HMAC-SHA256), BCrypt pour les mots de passe.
 - Les clés API sont stockées en hash SHA-256 uniquement — la valeur en clair n'est jamais persistée.
+- L'accès à `/api/export` est validé par un filtre dédié (`ApiKeyAuthFilter`) dans la chaîne Spring Security.
 - **Changer `APP_PASSWORD` et `JWT_SECRET` en production.**
+
+---
+
+## Compatibilité import/export
+
+Le contrat de backup/export suit une politique **N/N-1**.
+
+- Les payloads de version courante (N) et version précédente (N-1) doivent rester importables.
+- Toute évolution de schéma impose des tests unitaires et d'intégration de compatibilité.
+- La CI exécute un gate dédié sur ces tests.
+
+---
+
+## Gouvernance de la vérité produit
+
+- Phase 1 : le code reste la vérité d'exécution pendant la transition.
+- Phase 2 : OpenSpec devient la source canonique.
+- Toute évolution fonctionnelle doit mettre à jour README + CHANGELOG.
+
+Références internes : `docs/source-of-truth-governance.md`, `docs/technical-decisions.md`
 
 ---
 

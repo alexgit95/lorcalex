@@ -34,20 +34,31 @@ public class CollectionService {
         Card card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found: " + cardId));
 
+        int safeRegular = Math.max(0, quantity);
+        int safeFoil = Math.max(0, foilQuantity);
+
         Optional<UserCollection> existing = collectionRepository.findByCardId(cardId);
         UserCollection uc;
         if (existing.isPresent()) {
             uc = existing.get();
-            uc.setQuantity(uc.getQuantity() + quantity);
-            uc.setFoilQuantity(uc.getFoilQuantity() + foilQuantity);
-            uc.setFoil(foil);
+            uc.setQuantity(Math.max(0, uc.getQuantity()) + safeRegular);
+            uc.setFoilQuantity(Math.max(0, uc.getFoilQuantity()) + safeFoil);
         } else {
             uc = new UserCollection();
             uc.setCard(card);
-            uc.setQuantity(quantity);
-            uc.setFoilQuantity(foilQuantity);
-            uc.setFoil(foil);
+            uc.setQuantity(safeRegular);
+            uc.setFoilQuantity(safeFoil);
         }
+
+        // Canonical invariant: foil reflects whether at least one foil copy exists.
+        uc.setFoil(uc.getFoilQuantity() > 0);
+
+        // Remove zero-quantity entries to preserve owned semantics consistency.
+        if (uc.getQuantity() <= 0 && uc.getFoilQuantity() <= 0) {
+            collectionRepository.findByCardId(cardId).ifPresent(collectionRepository::delete);
+            return cardService.toDTO(card, null);
+        }
+
         collectionRepository.save(uc);
         return cardService.toDTO(card, uc);
     }
@@ -68,9 +79,7 @@ public class CollectionService {
                 });
         uc.setQuantity(Math.max(0, quantity));
         uc.setFoilQuantity(Math.max(0, foilQuantity));
-        if (foil != null) {
-            uc.setFoil(foil);
-        }
+        uc.setFoil(uc.getFoilQuantity() > 0);
         collectionRepository.save(uc);
         return cardService.toDTO(card, uc);
     }

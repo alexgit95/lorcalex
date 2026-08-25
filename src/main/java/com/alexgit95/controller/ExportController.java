@@ -4,11 +4,9 @@ import com.alexgit95.repository.AppSettingsRepository;
 import com.alexgit95.repository.CardRepository;
 import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
-import com.alexgit95.service.ApiKeyService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -21,24 +19,21 @@ import java.util.stream.Collectors;
  * Endpoint public d'export de la collection, accessible via clé API ({@code ?apiKey=…}).
  * <p>
  * Retourne exactement le même payload que {@code GET /api/admin/backup}.
- * Aucun JWT requis : la validation est effectuée en interne via {@link ApiKeyService}.
+ * Aucun JWT requis : la validation est effectuée en amont par {@code ApiKeyAuthFilter}.
  */
 @RestController
 @RequestMapping("/api/export")
 public class ExportController {
 
-    private final ApiKeyService apiKeyService;
     private final EditionRepository editionRepository;
     private final CardRepository cardRepository;
     private final UserCollectionRepository userCollectionRepository;
     private final AppSettingsRepository settingsRepository;
 
-    public ExportController(ApiKeyService apiKeyService,
-                            EditionRepository editionRepository,
+    public ExportController(EditionRepository editionRepository,
                             CardRepository cardRepository,
                             UserCollectionRepository userCollectionRepository,
                             AppSettingsRepository settingsRepository) {
-        this.apiKeyService = apiKeyService;
         this.editionRepository = editionRepository;
         this.cardRepository = cardRepository;
         this.userCollectionRepository = userCollectionRepository;
@@ -46,12 +41,7 @@ public class ExportController {
     }
 
     @GetMapping
-    public ResponseEntity<Map<String, Object>> export(
-            @RequestParam(name = "apiKey", required = false) String rawKey) {
-        if (apiKeyService.validateAndTouch(rawKey).isEmpty()) {
-            return ResponseEntity.status(403)
-                    .body(Map.of("error", "Clé API invalide ou expirée."));
-        }
+    public ResponseEntity<Map<String, Object>> export() {
         List<Map<String, Object>> editionsData = editionRepository.findAll().stream()
                 .map(e -> {
                     Map<String, Object> m = new LinkedHashMap<>();

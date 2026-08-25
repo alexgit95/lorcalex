@@ -1,0 +1,38 @@
+name: Import Export Compatibility Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  compatibility-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      - name: Ensure compatibility fixtures and tests exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/test/resources/compat/backup-v2-current-minimal.json
+          test -f src/test/resources/lorcalex-backup-2026-04-01.json
+          test -f src/test/java/com/alexgit95/controller/ImportExportCompatibilityUnitTest.java
+          test -f src/test/java/com/alexgit95/controller/ImportExportCompatibilityIntegrationTest.java
+
+      - name: Run compatibility unit and integration tests
+        shell: bash
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B -Dtest=ImportExportCompatibilityUnitTest,ImportExportCompatibilityIntegrationTest test
