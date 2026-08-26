@@ -393,6 +393,71 @@ public class PricingSyncService {
         return status;
     }
 
+    /**
+     * Temporary admin tool: apply pricing updates from a manually pasted provider
+     * JSON payload (same shape as an episode-cards API response), without calling
+     * the provider or consuming any daily/minute call budget.
+     */
+    @Transactional
+    public Map<String, Object> applyManualPricingImport(String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) {
+            return Map.of("success", false, "message", "Le JSON fourni est vide.");
+        }
+
+        Object parsed;
+        try {
+            parsed = new tools.jackson.databind.ObjectMapper().readValue(rawJson, Object.class);
+        } catch (Exception ex) {
+            return Map.of("success", false, "message", "JSON invalide: " + ex.getMessage());
+        }
+
+        List<Map<String, Object>> rows = extractManualImportRows(parsed);
+        if (rows.isEmpty()) {
+            return Map.of("success", false, "message", "Aucune carte trouvée dans le JSON fourni.");
+        }
+
+        Map<String, Integer> statusCounts = new LinkedHashMap<>();
+        MappingBatchResult result = applyPricingFromProviderRows(rows, null, statusCounts);
+
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("success", true);
+        report.put("rowsReceived", rows.size());
+        report.put("updatedCount", result.updatedCards());
+        report.put("unresolvedCount", result.unresolvedRows());
+        report.put("mappingSamples", result.mappingSamples());
+        report.put("priceSamples", result.priceSamples());
+        report.put("message", result.updatedCards() + " carte(s) mise(s) à jour, "
+                + result.unresolvedRows() + " non résolue(s) sur " + rows.size() + " ligne(s).");
+        return report;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> extractManualImportRows(Object parsed) {
+        List<?> rawList;
+        if (parsed instanceof Map<?, ?> root && root.get("data") instanceof List<?> dataList) {
+            rawList = dataList;
+        } else if (parsed instanceof List<?> list) {
+            rawList = list;
+        } else if (parsed instanceof Map<?, ?> singleCard) {
+            rawList = List.of(singleCard);
+        } else {
+            rawList = List.of();
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Object item : rawList) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            Map<String, Object> converted = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                converted.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            rows.add(converted);
+        }
+        return rows;
+    }
+
     private MappingBatchResult applyPricingFromProviderRows(List<Map<String, Object>> rows,
                                                             Integer episodeSetNumber,
                                                             Map<String, Integer> statusCounts) {
@@ -448,23 +513,26 @@ public class PricingSyncService {
     private static String buildRowDiagnostic(Map<String, Object> row) {
         String setCode = normalizeText(firstPresent(row, "set_code", "setCode", "editionCode", "edition_code", "code"));
         Integer setNumber = parseInteger(firstPresent(row, "set_num", "setNumber", "set_number", "set_id"));
+        Integer episodeCodeSetNumber = extractEpisodeCodeSetNumber(row);
         Integer cardNumber = parseInteger(firstPresent(row, "number", "card_number", "cardNumber", "collector_number", "card_num"));
         String externalId = normalizeText(firstPresent(row, "externalId", "external_id", "card_id", "cardId", "lorcana_id", "id"));
         String name = normalizeText(firstPresent(row, "name", "fullName", "card_name"));
         Object price = firstPresent(row, "marketPrice", "market_price", "price", "value", "amount", "eur", "usd");
         return "setCode=" + setCode
                 + ", setNumber=" + setNumber
+                + ", episodeCodeSetNumber=" + episodeCodeSetNumber
                 + ", cardNumber=" + cardNumber
                 + ", externalId=" + externalId
                 + ", name=" + name
                 + ", price=" + (price == null ? "null" : String.valueOf(price));
     }
 
-        private Optional<Card> resolveCard(Map<String, Object> payload, Integer episodeSetNumber) {
+    private Optional<Card> resolveCard(Map<String, Object> payload, Integer episodeSetNumber) {
         String editionCode = normalizeText(firstPresent(payload,
                 "set_code", "setCode", "editionCode", "edition_code", "code"));
         Integer setNumber = parseInteger(firstPresent(payload,
                 "set_num", "setNumber", "set_number", "set_id"));
+        Integer episodeCodeSetNumber = extractEpisodeCodeSetNumber(payload);
         if (editionCode == null) {
             Object setNode = payload.get("set");
             if (setNode instanceof Map<?, ?> setMap) {
@@ -477,6 +545,10 @@ public class PricingSyncService {
             }
         }
 
+        if (setNumber == null && episodeCodeSetNumber != null && episodeCodeSetNumber > 0) {
+            setNumber = episodeCodeSetNumber;
+        }
+
         if (setNumber == null && episodeSetNumber != null && episodeSetNumber > 0) {
             setNumber = episodeSetNumber;
         }
@@ -485,6 +557,11 @@ public class PricingSyncService {
                 "number", "card_number", "cardNumber", "collector_number", "card_num"));
 
         if (setNumber != null && cardNumber != null) {
+            Optional<Card> byEditionIdAndCard = cardRepository.findByCardNumberAndEditionId(cardNumber, Long.valueOf(setNumber));
+            if (byEditionIdAndCard.isPresent()) {
+                return byEditionIdAndCard;
+            }
+
             Optional<Card> bySetNumberAndCard = cardRepository.findByEditionSetNumberAndCardNumber(setNumber, cardNumber);
             if (bySetNumberAndCard.isPresent()) {
                 return bySetNumberAndCard;
@@ -511,11 +588,28 @@ public class PricingSyncService {
     }
 
     private BigDecimalPrice extractPriceFromRow(Map<String, Object> payload) {
-        java.math.BigDecimal parsed = extractPriceNode(payload, false);
+        java.math.BigDecimal parsed = extractCardmarketPreferredPrice(payload);
+        if (parsed == null) {
+            parsed = extractPriceNode(payload, false);
+        }
         if (parsed != null) {
             parsed = parsed.setScale(2, java.math.RoundingMode.HALF_UP);
         }
         return new BigDecimalPrice(parsed);
+    }
+
+    /** French near-mint cardmarket price is the authoritative source when present. */
+    private java.math.BigDecimal extractCardmarketPreferredPrice(Map<String, Object> payload) {
+        Object pricesNode = payload.get("prices");
+        if (!(pricesNode instanceof Map<?, ?> pricesMap)) {
+            return null;
+        }
+        Object cardmarketNode = pricesMap.get("cardmarket");
+        if (!(cardmarketNode instanceof Map<?, ?> cardmarketMap)) {
+            return null;
+        }
+        Object preferred = cardmarketMap.get("lowest_near_mint_FR_EU_only");
+        return extractPriceNode(preferred, true);
     }
 
     private java.math.BigDecimal extractPriceNode(Object node, boolean fromLikelyPriceContext) {
@@ -682,12 +776,54 @@ public class PricingSyncService {
             return setNumber;
         }
 
+        Integer fromCode = parseLeadingInteger(firstPresent(episodePayload, "code", "episode_code", "episodeCode"));
+        if (fromCode != null) {
+            return fromCode;
+        }
+
         Object setNode = episodePayload.get("set");
         if (setNode instanceof Map<?, ?> setMap) {
             return parseInteger(firstPresent(setMap, "set_num", "setNumber", "set_number", "number", "id"));
         }
 
         return null;
+    }
+
+    private static Integer extractEpisodeCodeSetNumber(Map<String, Object> payload) {
+        Object episodeNode = payload.get("episode");
+        if (episodeNode instanceof Map<?, ?> episodeMap) {
+            Integer fromEpisodeCode = parseLeadingInteger(firstPresent(episodeMap, "code", "episode_code", "episodeCode"));
+            if (fromEpisodeCode != null) {
+                return fromEpisodeCode;
+            }
+        }
+
+        return parseLeadingInteger(firstPresent(payload, "episode_code", "episodeCode"));
+    }
+
+    private static Integer parseLeadingInteger(Object raw) {
+        if (raw instanceof Number n) {
+            return n.intValue();
+        }
+        if (!(raw instanceof String s)) {
+            return null;
+        }
+
+        String normalized = s.trim();
+        if (normalized.isEmpty() || !Character.isDigit(normalized.charAt(0))) {
+            return null;
+        }
+
+        int idx = 0;
+        while (idx < normalized.length() && Character.isDigit(normalized.charAt(idx))) {
+            idx++;
+        }
+
+        try {
+            return Integer.parseInt(normalized.substring(0, idx));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static boolean isMinuteLimitReached(Deque<Long> callWindowMillis, int minuteLimit) {

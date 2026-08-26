@@ -145,6 +145,16 @@ public class AdminController {
         return ResponseEntity.ok(pricingSyncService.runSync("manual", maxAttempts));
     }
 
+    /**
+     * Temporary tool: simulate a provider episode-cards API response by applying
+     * pricing from a manually pasted JSON payload, without calling the provider.
+     */
+    @PostMapping("/pricing/simulate-import")
+    public ResponseEntity<Map<String, Object>> simulatePricingImport(@RequestBody Map<String, String> body) {
+        String json = body != null ? body.get("json") : null;
+        return ResponseEntity.ok(pricingSyncService.applyManualPricingImport(json));
+    }
+
     @PostMapping("/import/companion")
     public ResponseEntity<Map<String, Object>> importCompanionCollection(
             @RequestParam("file") MultipartFile file,

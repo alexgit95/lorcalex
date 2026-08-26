@@ -103,6 +103,11 @@ const api = {
     body: JSON.stringify(maxAttempts === undefined ? {} : { maxAttempts })
   }),
 
+  simulatePricingImport: (json) => apiFetch('/admin/pricing/simulate-import', {
+    method: 'POST',
+    body: JSON.stringify({ json })
+  }),
+
   computeHashes: () => apiFetch('/admin/compute-hashes', { method: 'POST' }),
 
   fullBackup: () => apiFetch('/admin/backup'),
@@ -1913,6 +1918,19 @@ function renderAdmin() {
         <div id="pricingSettingsResult"></div>
       </div>
 
+      <!-- Simulation import prix (temporaire, à retirer après validation) -->
+      <div class="edition-item" style="margin-bottom:12px;border:1px dashed var(--accent)">
+        <h3 style="margin-bottom:8px">🧪 Simulation import prix (temporaire)</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Collez ici la réponse JSON brute de l'API pricing (par exemple <code>/episodes/{id}/cards</code>) pour appliquer
+          les prix aux cartes locales <strong>sans appeler l'API</strong> et sans consommer de budget d'appels.
+        </p>
+        <textarea id="pricingSimulateJson" rows="8" placeholder='{"data":[{"card_number":143,"episode":{"code":"11WSP"},"prices":{...}}]}'
+          style="width:100%;border-radius:8px;font-family:monospace;font-size:.8rem;padding:8px"></textarea>
+        <button class="btn btn-accent btn-full" id="pricingSimulateBtn" style="margin-top:8px">▶️ Appliquer les prix depuis ce JSON</button>
+        <div id="pricingSimulateResult" style="margin-top:8px"></div>
+      </div>
+
       <!-- Sauvegarde / Restauration complètes -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">💾 Sauvegarde &amp; Restauration complètes</h3>
@@ -2144,6 +2162,24 @@ function renderAdmin() {
         showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur run pricing : ' + err.message });
       } finally {
         setSyncBusy(false);
+      }
+    });
+
+    document.getElementById('pricingSimulateBtn').addEventListener('click', async () => {
+      const rawJson = document.getElementById('pricingSimulateJson').value.trim();
+      if (!rawJson) {
+        showAdminResult('pricingSimulateResult', { success: false, message: 'Collez un JSON avant de lancer la simulation.' });
+        return;
+      }
+      try {
+        const result = await api.simulatePricingImport(rawJson);
+        showAdminResult('pricingSimulateResult', {
+          success: !!result.success,
+          message: result.message || (result.success ? 'Import simulé appliqué.' : 'Echec de la simulation.')
+        });
+        if (result.success) await refreshPricingStatus();
+      } catch (err) {
+        showAdminResult('pricingSimulateResult', { success: false, message: 'Erreur simulation import : ' + err.message });
       }
     });
 
