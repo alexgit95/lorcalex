@@ -7,7 +7,7 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
-## [Unreleased]
+## [2.8.0]
 
 ### Added
 

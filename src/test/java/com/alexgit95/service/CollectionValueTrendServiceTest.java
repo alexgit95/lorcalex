@@ -40,23 +40,25 @@ class CollectionValueTrendServiceTest {
     @Test
     @DisplayName("returns ordered global trend and edition deltas")
     void returnsOrderedTrendAndEditionDeltas() {
+        LocalDateTime referenceTime = LocalDateTime.now();
+
         CollectionValueSnapshot snapshot0 = new CollectionValueSnapshot();
         snapshot0.setId(1L);
-        snapshot0.setRecordedAt(LocalDateTime.now().minusDays(30));
+        snapshot0.setRecordedAt(referenceTime.minusDays(30));
         snapshot0.setTotalCollectionValueEur(new BigDecimal("100.00"));
         snapshot0.setCurrency("EUR");
         snapshot0.setSource("PRICING_SYNC");
 
         CollectionValueSnapshot snapshot1 = new CollectionValueSnapshot();
         snapshot1.setId(2L);
-        snapshot1.setRecordedAt(LocalDateTime.now().minusDays(7));
+        snapshot1.setRecordedAt(referenceTime.minusDays(7));
         snapshot1.setTotalCollectionValueEur(new BigDecimal("120.00"));
         snapshot1.setCurrency("EUR");
         snapshot1.setSource("PRICING_SYNC");
 
         CollectionValueSnapshot snapshot2 = new CollectionValueSnapshot();
         snapshot2.setId(3L);
-        snapshot2.setRecordedAt(LocalDateTime.now());
+        snapshot2.setRecordedAt(referenceTime);
         snapshot2.setTotalCollectionValueEur(new BigDecimal("150.00"));
         snapshot2.setCurrency("EUR");
         snapshot2.setSource("PRICING_SYNC");
@@ -65,7 +67,7 @@ class CollectionValueTrendServiceTest {
 
         EditionValueSnapshot editionSnapshotNow = new EditionValueSnapshot();
         editionSnapshotNow.setId(10L);
-        editionSnapshotNow.setRecordedAt(LocalDateTime.now());
+        editionSnapshotNow.setRecordedAt(referenceTime);
         editionSnapshotNow.setEditionId(99L);
         editionSnapshotNow.setEditionCode("TFC");
         editionSnapshotNow.setEditionName("TFC");
@@ -73,7 +75,7 @@ class CollectionValueTrendServiceTest {
 
         EditionValueSnapshot editionSnapshot7d = new EditionValueSnapshot();
         editionSnapshot7d.setId(11L);
-        editionSnapshot7d.setRecordedAt(LocalDateTime.now().minusDays(7));
+        editionSnapshot7d.setRecordedAt(referenceTime.minusDays(7));
         editionSnapshot7d.setEditionId(99L);
         editionSnapshot7d.setEditionCode("TFC");
         editionSnapshot7d.setEditionName("TFC");
@@ -81,7 +83,7 @@ class CollectionValueTrendServiceTest {
 
         EditionValueSnapshot editionSnapshot30d = new EditionValueSnapshot();
         editionSnapshot30d.setId(12L);
-        editionSnapshot30d.setRecordedAt(LocalDateTime.now().minusDays(30));
+        editionSnapshot30d.setRecordedAt(referenceTime.minusDays(30));
         editionSnapshot30d.setEditionId(99L);
         editionSnapshot30d.setEditionCode("TFC");
         editionSnapshot30d.setEditionName("TFC");
