@@ -69,6 +69,8 @@ const api = {
   getStatistics: () => apiFetch('/statistics'),
 
   getPricingInsights: () => apiFetch('/pricing/insights'),
+  getTrend: () => apiFetch('/pricing/trend'),
+  getEditionDeltas: () => apiFetch('/pricing/edition-deltas'),
 
   getSettings: () => apiFetch('/admin/settings'),
 
@@ -252,6 +254,20 @@ function formatEuro(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+function formatSignedPercent(value) {
+  if (value == null || value === '') return '—';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
+}
+
+function percentTone(value) {
+  if (value == null || value === '') return 'var(--text-muted)';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 'var(--text-muted)';
+  return num >= 0 ? 'var(--success)' : 'var(--danger)';
 }
 
 let recentCardsState = [];
@@ -550,6 +566,16 @@ function renderPricingPage() {
           : `<div class="cards-grid">${pricingCardsState.map(c => pricingCardItemHTML(c)).join('')}</div>`}
       </div>
 
+      <div class="chart-container" style="margin:10px 0 16px">
+        <h3>Évolution de la valeur totale de la collection</h3>
+        <div style="height:220px"><canvas id="collectionTrendChart"></canvas></div>
+      </div>
+
+      <div style="padding:0 12px 4px">
+        <h3 style="color:var(--text-muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Tendance par édition (Δ 7j / 30j)</h3>
+        <div id="editionDeltaTable" aria-live="polite"></div>
+      </div>
+
       <div style="padding:0 12px 4px">
         <h3 style="color:var(--text-muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Valeur par édition suivie</h3>
         ${editionRows || `<div class="empty-state" style="padding:24px 8px"><h3>Aucune édition suivie</h3><p>Activez des sets dans l'administration pour voir les valorisations.</p></div>`}
@@ -558,6 +584,82 @@ function renderPricingPage() {
     content.querySelectorAll('.card-item[data-id]').forEach(el => {
       el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
     });
+
+    return Promise.all([
+      api.getTrend(),
+      api.getEditionDeltas(),
+    ]);
+  }).then(([trendData, editionDeltaData]) => {
+    const trendPoints = Array.isArray(trendData?.trend) ? trendData.trend : [];
+    const chartEl = document.getElementById('collectionTrendChart');
+    if (chartEl && trendPoints.length > 0) {
+      const labels = trendPoints.map(p => {
+        const d = new Date(p.recordedAt);
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+      });
+      const values = trendPoints.map(p => Number(p.totalCollectionValueEur ?? 0));
+
+      new Chart(chartEl, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Valeur totale (EUR)',
+            data: values,
+            borderColor: '#7fb3ff',
+            backgroundColor: 'rgba(127,179,255,0.18)',
+            borderWidth: 2,
+            pointRadius: 3,
+            fill: true,
+            tension: 0.22,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'nearest', intersect: false },
+          plugins: { legend: { labels: { color: '#e8eaf6' } } },
+          scales: {
+            x: {
+              ticks: { color: '#90a4ae' },
+              grid: { color: '#2d4060' },
+            },
+            y: {
+              ticks: { color: '#90a4ae', callback: value => `${value}€` },
+              grid: { color: '#2d4060' },
+            },
+          },
+        },
+      });
+    }
+
+    const tableEl = document.getElementById('editionDeltaTable');
+    if (tableEl) {
+      const rows = (Array.isArray(editionDeltaData) ? editionDeltaData : []).map(e => `
+        <div class="edition-item">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div>
+              <h3>${esc(e.editionName || e.editionCode || 'Édition')}</h3>
+              <div class="edition-code">${esc(e.editionCode || '')}</div>
+            </div>
+            <span style="color:var(--accent);font-weight:700">${formatEuro(e.currentValueEur || 0)}</span>
+          </div>
+          <div style="margin-top:8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;font-size:.78rem;">
+            <div style="padding:6px 8px;border-radius:8px;background:var(--bg-card2);">
+              <div style="color:var(--text-muted)">7 jours</div>
+              <div style="margin-top:4px; font-weight:700; color:${percentTone(e.delta7dPercent)}">${formatSignedPercent(e.delta7dPercent)}</div>
+              <div style="color:var(--text-muted)">${e.value7dEur != null ? formatEuro(e.value7dEur) : '—'}</div>
+            </div>
+            <div style="padding:6px 8px;border-radius:8px;background:var(--bg-card2);">
+              <div style="color:var(--text-muted)">30 jours</div>
+              <div style="margin-top:4px; font-weight:700; color:${percentTone(e.delta30dPercent)}">${formatSignedPercent(e.delta30dPercent)}</div>
+              <div style="color:var(--text-muted)">${e.value30dEur != null ? formatEuro(e.value30dEur) : '—'}</div>
+            </div>
+          </div>
+        </div>`).join('');
+
+      tableEl.innerHTML = rows || `<div class="empty-state" style="padding:24px 8px"><h3>Aucune donnée historique</h3><p>Les snapshots de valeur seront ajoutés après les prochaines synchronisations de prix.</p></div>`;
+    }
   }).catch(err => {
     const content = document.getElementById('pricingTabContent');
     if (!content) return;

@@ -11,6 +11,20 @@ et ce projet respecte la Versioning Sémantique.
 
 ### Added
 
+- Snapshot historique de la valeur totale de la collection calculé après chaque synchronisation pricing réussie.
+- Graphique d'évolution de la valeur globale et tableau de tendance par édition avec changements sur 7 jours et 30 jours.
+- Endpoints `GET /api/pricing/trend` et `GET /api/pricing/edition-deltas` pour consultater les snapshots historiques.
+
+### Changed
+
+- La vue Prix expose désormais la trajectoire historique globale et les deltas par édition en plus de la valorisation actuelle.
+
+---
+
+## [2.7.0] - Sync pricing paginee par sets et limites API strictes
+
+### Added
+
 - Synchronisation pricing provider en pagination par sets (`/episodes`) puis pagination cartes par set (`/episodes/{id}/cards?page=n&per_page=100`).
 - Curseur persistant de reprise (`phase`, `episodePage`, `episodeId`, `episodeCardsPage`) pour continuer un run partiel sur les runs suivants.
 - Nouvelles cles de parametrage admin pour hard cap journalier, marge de securite, limite minute, endpoints provider pagines et telemetrie d'arret.

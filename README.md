@@ -365,6 +365,8 @@ Un onglet `Prix` expose une vue opérationnelle en lecture seule:
 - Les 20 dernières cartes du catalogue ayant reçu un prix (`lastPriceAt` décroissant).
 - La valorisation par édition suivie (même périmètre que `stats_enabled_sets`).
 - Le total global de valorisation collection en EUR.
+- Un graphique historique de la valeur totale de la collection calculé à chaque synchronisation pricing.
+- Un tableau par édition affichant la valeur courante et les écarts sur 7 jours et 30 jours.
 
 Règle de valorisation par carte:
 
@@ -375,6 +377,16 @@ Contraintes monétaires:
 - Affichage et agrégats en EUR uniquement.
 - Les cartes sans prix (`marketPrice` null) ou avec devise non-EUR sont exclues des agrégats.
 - Le payload de l'onglet Prix expose des compteurs d'exclusion (`excludedNoPrice`, `excludedNonEur`).
+
+### Historique de valeur et tendances
+
+Après chaque synchronisation pricing réussie, le backend enregistre un snapshot global puis un snapshot par édition.
+
+- `GET /api/pricing/trend` renvoie les points de valeur totale de la collection triés chronologiquement.
+- `GET /api/pricing/edition-deltas` renvoie pour chaque édition la valeur courante, la valeur de référence à 7 jours et à 30 jours, ainsi que les variations en pourcentage.
+- Les deltas sont calculés à partir des snapshots historiques les plus récents à ou avant les seuils temporels.
+
+Le modèle de données historique est donc aligné sur la chronologie des synchronisations, ce qui permet de tracer la valeur globale sur le temps et de comparer l'évolution par set.
 
 ### Paramètres principaux
 

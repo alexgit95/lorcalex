@@ -27,14 +27,17 @@ public class PricingSyncService {
     private final CardRepository cardRepository;
     private final PricingSettingsService pricingSettingsService;
     private final PricingProviderClient pricingProviderClient;
+    private final CollectionValueTrendService collectionValueTrendService;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public PricingSyncService(CardRepository cardRepository,
                               PricingSettingsService pricingSettingsService,
-                              PricingProviderClient pricingProviderClient) {
+                              PricingProviderClient pricingProviderClient,
+                              CollectionValueTrendService collectionValueTrendService) {
         this.cardRepository = cardRepository;
         this.pricingSettingsService = pricingSettingsService;
         this.pricingProviderClient = pricingProviderClient;
+        this.collectionValueTrendService = collectionValueTrendService;
     }
 
     @Transactional
@@ -368,6 +371,9 @@ public class PricingSyncService {
                         stopReason,
                         statusCounts
             );
+            if ("COMPLETED".equals(reasonCode) || "MAX_ATTEMPTS_REACHED".equals(reasonCode)) {
+                collectionValueTrendService.persistSnapshotFromCurrentCollection();
+            }
             return report;
         } catch (Exception ex) {
             log.error("Pricing sync run failed", ex);

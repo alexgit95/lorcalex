@@ -39,11 +39,14 @@ class PricingSyncServiceTest {
     @Mock
     private PricingProviderClient pricingProviderClient;
 
+    @Mock
+    private CollectionValueTrendService collectionValueTrendService;
+
     private PricingSyncService pricingSyncService;
 
     @BeforeEach
     void setUp() {
-        pricingSyncService = new PricingSyncService(cardRepository, pricingSettingsService, pricingProviderClient);
+        pricingSyncService = new PricingSyncService(cardRepository, pricingSettingsService, pricingProviderClient, collectionValueTrendService);
     }
 
     @Test
