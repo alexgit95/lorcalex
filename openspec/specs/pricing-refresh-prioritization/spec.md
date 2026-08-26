@@ -4,7 +4,7 @@
 TBD - created by archiving change add-card-pricing-sync-with-daily-attempt-quota. Update Purpose after archive.
 ## Requirements
 ### Requirement: Missing-value first prioritization
-The pricing scheduler SHALL prioritize cards without value before any card that already has a value timestamp.
+The pricing scheduler SHALL prioritize cards without value before any card with existing value metadata.
 
 #### Scenario: Queue build with mixed cards
 - **WHEN** the scheduler evaluates candidate cards for update

@@ -598,7 +598,7 @@ public class PricingSyncService {
         return new BigDecimalPrice(parsed);
     }
 
-    /** French near-mint cardmarket price is the authoritative source when present. */
+    /** French near-mint cardmarket price is authoritative; a currency-checked generic near-mint price is the next fallback. */
     private java.math.BigDecimal extractCardmarketPreferredPrice(Map<String, Object> payload) {
         Object pricesNode = payload.get("prices");
         if (!(pricesNode instanceof Map<?, ?> pricesMap)) {
@@ -608,9 +608,27 @@ public class PricingSyncService {
         if (!(cardmarketNode instanceof Map<?, ?> cardmarketMap)) {
             return null;
         }
-        Object preferred = cardmarketMap.get("lowest_near_mint_FR_EU_only");
-        return extractPriceNode(preferred, true);
+
+        java.math.BigDecimal frEuOnly = extractPriceNode(cardmarketMap.get("lowest_near_mint_FR_EU_only"), true);
+        if (frEuOnly != null) {
+            return frEuOnly;
+        }
+
+        if (!isAcceptableCardmarketCurrency(cardmarketMap)) {
+            return null;
+        }
+        return extractPriceNode(cardmarketMap.get("lowest_near_mint"), true);
     }
+
+    private boolean isAcceptableCardmarketCurrency(Map<?, ?> cardmarketMap) {
+        Object currencyNode = cardmarketMap.get("currency");
+        if (currencyNode == null) {
+            return true;
+        }
+        String expected = pricingSettingsService.getProviderCurrency();
+        return expected == null || expected.isBlank() || String.valueOf(currencyNode).trim().equalsIgnoreCase(expected);
+    }
+
 
     private java.math.BigDecimal extractPriceNode(Object node, boolean fromLikelyPriceContext) {
         if (node == null) {
@@ -680,7 +698,7 @@ public class PricingSyncService {
     }
 
     private static boolean isLikelyPriceContainerKey(String key) {
-        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT);
+        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT).replace("_", "");
         return normalized.contains("pricing")
                 || normalized.contains("prices")
                 || normalized.contains("cardmarket")

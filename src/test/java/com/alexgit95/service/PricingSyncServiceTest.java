@@ -336,6 +336,143 @@ class PricingSyncServiceTest {
             assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.09");
             }
 
+            @Test
+            @DisplayName("runSync falls back to cardmarket lowest_near_mint when FR_EU_only is absent")
+            void runSync_fallsBackToCardmarketLowestNearMintWhenFrEuOnlyMissing() {
+            Card localCard = card("ext-generic-near-mint", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 167);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint", 0.15,
+                    "30d_average", 999.99
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(167, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.15");
+            }
+
+            @Test
+            @DisplayName("runSync rejects cardmarket lowest_near_mint fallback when currency does not match provider currency")
+            void runSync_rejectsLowestNearMintFallbackOnCurrencyMismatch() {
+            Card localCard = card("ext-currency-mismatch", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 168);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "USD",
+                    "lowest_near_mint", 0.20
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(168, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(0);
+            assertThat(report.get("unresolvedCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isNull();
+            verify(cardRepository, never()).save(localCard);
+            }
+
+            @Test
+            @DisplayName("runSync treats zero as a legitimate FR_EU_only price rather than missing")
+            void runSync_treatsZeroAsLegitimateFrEuOnlyPrice() {
+            Card localCard = card("ext-zero-price", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 169);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint_FR_EU_only", 0,
+                    "lowest_near_mint", 5.00
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(169, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.00");
+            }
+
+            @Test
+            @DisplayName("runSync falls back to prices.tcg_player.market_price when cardmarket is unavailable")
+            void runSync_fallsBackToTcgPlayerMarketPriceWhenCardmarketUnavailable() {
+            Card localCard = card("ext-tcg-player-price", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 170);
+            providerRow.put("prices", Map.of(
+                "tcg_player", Map.of("currency", "EUR", "market_price", 3.42)
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(170, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("3.42");
+            }
+
         @Test
         @DisplayName("runSync parses nested price with comma decimal")
         void runSync_parsesNestedCommaPrice() {
