@@ -256,6 +256,19 @@ function formatEuro(value) {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
+function priceMetadataHTML(card) {
+  const price = card.marketPrice != null
+    ? `<div>Prix : <strong style="color:var(--accent)">${formatEuro(card.marketPrice)}</strong></div>`
+    : '';
+  const updatedAt = card.lastPriceAt
+    ? `<div>Dernière mise à jour : <strong style="color:var(--text)">${formatDateTime(card.lastPriceAt)}</strong></div>`
+    : '';
+
+  if (!price && !updatedAt) return '';
+
+  return `<div style="font-size:.8rem;color:var(--text-muted);margin-top:10px;line-height:1.6">${price}${updatedAt}</div>`;
+}
+
 function formatSignedPercent(value) {
   if (value == null || value === '') return '—';
   const num = Number(value);
@@ -753,6 +766,7 @@ function openModal(cardId) {
           ${card.rarity
             ? `<div style="font-size:.85rem;font-weight:600;margin-bottom:12px;color:${RARITY_COLORS[card.rarity]||'var(--text-muted)'}">${esc(card.rarity)}</div>`
             : ''}
+          ${priceMetadataHTML(card)}
 
           <div class="modal-qty-section">
             ${card.owned
@@ -1693,6 +1707,7 @@ function renderCardConfirmation(card) {
           <div style="font-size:.78rem;color:var(--primary-light);font-weight:700;margin-top:4px">${esc(card.editionCode)}</div>
           <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">#${esc(String(card.cardNumber))} · ${esc(card.rarity)}</div>
           ${ownedInfo}
+          ${priceMetadataHTML(card)}
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:16px;flex-direction:column">

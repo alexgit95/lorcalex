@@ -7,6 +7,14 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- La fiche de détail d'une carte et la confirmation du scanner affichent désormais le prix de marché et sa dernière date de mise à jour lorsqu'ils sont disponibles.
+
+---
+
 ## [2.7.0] - Sync pricing paginee par sets et limites API strictes
 
 ### Added

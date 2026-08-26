@@ -174,6 +174,7 @@ Cliquer sur une carte ouvre un écran détail avec :
 
 - Grande image plein-écran
 - Set + numéro + nom + rareté
+- Prix de marché et date de dernière mise à jour, lorsqu'ils sont disponibles
 - Compteurs **Regular** et **Foil** modifiables indépendamment (boutons + / −)
 - Dates de premier ajout et de dernière modification
 
