@@ -28,6 +28,14 @@ public interface CardRepository extends JpaRepository<Card, Long> {
     Optional<Card> findByEditionCodeAndCardNumber(@Param("editionCode") String editionCode,
                                                   @Param("cardNumber") Integer cardNumber);
 
+    @Query("SELECT c FROM Card c JOIN c.edition e WHERE e.setNumber = :setNumber AND c.cardNumber = :cardNumber")
+    Optional<Card> findByEditionSetNumberAndCardNumber(@Param("setNumber") Integer setNumber,
+                                                       @Param("cardNumber") Integer cardNumber);
+
+    @Query("SELECT c FROM Card c WHERE c.cardNumber = :cardNumber AND LOWER(c.name) = LOWER(:name)")
+    List<Card> findByCardNumberAndNameIgnoreCase(@Param("cardNumber") Integer cardNumber,
+                                                 @Param("name") String name);
+
     List<Card> findByExternalIdIn(Collection<String> externalIds);
 
     @Query("SELECT c FROM Card c WHERE LOWER(c.name) LIKE LOWER(CONCAT('%', :query, '%'))")

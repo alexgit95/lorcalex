@@ -73,6 +73,7 @@ public class PricingSyncService {
             int pagesProcessed = 0;
             int episodePagesProcessed = 0;
             int episodeCardsPagesProcessed = 0;
+            int unresolvedDiagnosticLogs = 0;
             Map<String, Integer> statusCounts = new LinkedHashMap<>();
             boolean configMissingBlocked = false;
             PricingSettingsService.CursorState cursor = pricingSettingsService.getCursor();
@@ -209,6 +210,18 @@ public class PricingSyncService {
                         unresolvedMappings += mappingResult.unresolvedRows;
                         resolvedMappings += mappingResult.updatedCards;
                         unresolvedCount += mappingResult.unresolvedRows;
+                        if (mappingResult.unresolvedRows > 0 && unresolvedDiagnosticLogs < 5) {
+                            unresolvedDiagnosticLogs++;
+                            log.warn(
+                                    "Pricing mapping diagnostics (trigger={}, episodeId={}, page={}, unresolvedRows={}, sampleMappings={}, samplePrices={})",
+                                    trigger,
+                                    episodeId,
+                                    episodeCardsPage,
+                                    mappingResult.unresolvedRows,
+                                    mappingResult.mappingSamples,
+                                    mappingResult.priceSamples
+                            );
+                        }
 
                         int currentCardsPage = cardsPage.paging() != null ? cardsPage.paging().current() : episodeCardsPage;
                         int totalCardsPages = cardsPage.paging() != null ? cardsPage.paging().total() : currentCardsPage;
@@ -381,22 +394,30 @@ public class PricingSyncService {
     private MappingBatchResult applyPricingFromProviderRows(List<Map<String, Object>> rows,
                                                             Map<String, Integer> statusCounts) {
         if (rows == null || rows.isEmpty()) {
-            return new MappingBatchResult(0, 0);
+            return new MappingBatchResult(0, 0, List.of(), List.of());
         }
 
         List<MappedRow> mappedRows = new ArrayList<>();
         int unresolved = 0;
+        List<String> mappingSamples = new ArrayList<>();
+        List<String> priceSamples = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Optional<Card> maybeCard = resolveCard(row);
             if (maybeCard.isEmpty()) {
                 unresolved++;
                 statusCounts.merge("UNRESOLVED_MAPPING", 1, Integer::sum);
+                if (mappingSamples.size() < 3) {
+                    mappingSamples.add(buildRowDiagnostic(row));
+                }
                 continue;
             }
             BigDecimalPrice price = extractPriceFromRow(row);
             if (price.value == null) {
                 unresolved++;
                 statusCounts.merge("UNRESOLVED_PRICE", 1, Integer::sum);
+                if (priceSamples.size() < 3) {
+                    priceSamples.add(buildRowDiagnostic(row));
+                }
                 continue;
             }
             mappedRows.add(new MappedRow(maybeCard.get(), price.value));
@@ -418,21 +439,43 @@ public class PricingSyncService {
             statusCounts.merge("SUCCESS", 1, Integer::sum);
             updated++;
         }
-        return new MappingBatchResult(updated, unresolved);
+        return new MappingBatchResult(updated, unresolved, mappingSamples, priceSamples);
+    }
+
+    private static String buildRowDiagnostic(Map<String, Object> row) {
+        String setCode = normalizeText(firstPresent(row, "set_code", "setCode", "editionCode", "edition_code", "code"));
+        Integer setNumber = parseInteger(firstPresent(row, "set_num", "setNumber", "set_number", "set_id"));
+        Integer cardNumber = parseInteger(firstPresent(row, "number", "card_number", "cardNumber", "collector_number", "card_num"));
+        String externalId = normalizeText(firstPresent(row, "externalId", "external_id", "card_id", "cardId", "lorcana_id", "id"));
+        String name = normalizeText(firstPresent(row, "name", "fullName", "card_name"));
+        Object price = firstPresent(row, "marketPrice", "market_price", "price", "value", "amount", "eur", "usd");
+        return "setCode=" + setCode
+                + ", setNumber=" + setNumber
+                + ", cardNumber=" + cardNumber
+                + ", externalId=" + externalId
+                + ", name=" + name
+                + ", price=" + (price == null ? "null" : String.valueOf(price));
     }
 
     private Optional<Card> resolveCard(Map<String, Object> payload) {
         String editionCode = normalizeText(firstPresent(payload,
-                "set_code", "setCode", "editionCode", "code"));
+                "set_code", "setCode", "editionCode", "edition_code", "code"));
+        Integer setNumber = parseInteger(firstPresent(payload,
+                "set_num", "setNumber", "set_number", "set_id"));
         if (editionCode == null) {
             Object setNode = payload.get("set");
             if (setNode instanceof Map<?, ?> setMap) {
-                editionCode = normalizeText(firstPresent(setMap, "code", "set_code", "setCode", "id"));
+                editionCode = normalizeText(firstPresent(setMap, "code", "set_code", "setCode", "abbreviation", "slug"));
+                if (setNumber == null) {
+                    setNumber = parseInteger(firstPresent(setMap, "set_num", "setNumber", "set_number", "number", "id"));
+                }
+            } else if (setNode instanceof String s && !s.isBlank()) {
+                editionCode = s.trim();
             }
         }
 
         Integer cardNumber = parseInteger(firstPresent(payload,
-                "number", "card_number", "cardNumber"));
+                "number", "card_number", "cardNumber", "collector_number", "card_num"));
 
         if (editionCode != null && cardNumber != null) {
             Optional<Card> byCodeNumber = cardRepository.findByEditionCodeAndCardNumber(editionCode, cardNumber);
@@ -441,11 +484,27 @@ public class PricingSyncService {
             }
         }
 
-        String externalId = normalizeText(firstPresent(payload, "externalId", "external_id", "id"));
+        if (setNumber != null && cardNumber != null) {
+            Optional<Card> bySetNumberAndCard = cardRepository.findByEditionSetNumberAndCardNumber(setNumber, cardNumber);
+            if (bySetNumberAndCard.isPresent()) {
+                return bySetNumberAndCard;
+            }
+        }
+
+        String externalId = normalizeText(firstPresent(payload,
+                "externalId", "external_id", "card_id", "cardId", "lorcana_id", "id"));
         if (externalId != null) {
             Optional<Card> byExternalId = cardRepository.findByExternalId(externalId);
             if (byExternalId.isPresent()) {
                 return byExternalId;
+            }
+        }
+
+        String name = normalizeText(firstPresent(payload, "name", "fullName", "card_name"));
+        if (name != null && cardNumber != null) {
+            List<Card> byNameAndNumber = cardRepository.findByCardNumberAndNameIgnoreCase(cardNumber, name);
+            if (byNameAndNumber.size() == 1) {
+                return Optional.of(byNameAndNumber.getFirst());
             }
         }
 
@@ -555,7 +614,10 @@ public class PricingSyncService {
         return 2;
     }
 
-    private record MappingBatchResult(int updatedCards, int unresolvedRows) {
+    private record MappingBatchResult(int updatedCards,
+                                      int unresolvedRows,
+                                      List<String> mappingSamples,
+                                      List<String> priceSamples) {
     }
 
     private record MappedRow(Card card, java.math.BigDecimal price) {
