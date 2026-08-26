@@ -213,6 +213,106 @@ class PricingSyncServiceTest {
         verify(cardRepository, never()).save(any(Card.class));
     }
 
+        @Test
+        @DisplayName("runSync resolves card with episode set number plus card number")
+        void runSync_resolvesByEpisodeSetNumberAndCardNumber() {
+            Card localCard = card("ext-123", null);
+
+            when(pricingSettingsService.isSyncEnabled()).thenReturn(true);
+            when(pricingSettingsService.getCursor()).thenReturn(PricingSettingsService.CursorState.initial());
+            when(pricingSettingsService.getMinuteLimit()).thenReturn(30);
+            when(pricingSettingsService.hasRemainingAttempts()).thenReturn(true, true, false);
+            when(pricingSettingsService.tryConsumeAttempt()).thenReturn(true, true, false);
+            when(pricingSettingsService.getProviderName()).thenReturn("rapidapi");
+            when(pricingSettingsService.getProviderCurrency()).thenReturn("EUR");
+            when(pricingSettingsService.getBudgetStatus()).thenReturn(Map.of(
+                    "dailyBudget", 2,
+                    "dailyHardLimit", 100,
+                    "dailySafetyMargin", 0,
+                    "effectiveDailyBudget", 2,
+                    "minuteLimit", 30,
+                    "usedAttempts", 2,
+                    "remainingAttempts", 0
+            ));
+
+            when(cardRepository.countByMarketPriceIsNull()).thenReturn(1L);
+            when(cardRepository.countByLastPriceAtIsNotNull()).thenReturn(0L);
+            when(cardRepository.findByMarketPriceIsNotNullAndLastPriceAtBeforeOrderByLastPriceAtAscIdAsc(any(LocalDateTime.class)))
+                    .thenReturn(List.of());
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                    List.of(Map.of("id", 206L, "set_num", 6)),
+                    new PricingProviderClient.Paging(1, 1, 1)
+            ));
+            when(pricingProviderClient.fetchEpisodeCardsPage(206L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                    List.of(Map.of(
+                            "card_number", 22,
+                            "price", "1.25"
+                    )),
+                    new PricingProviderClient.Paging(1, 1, 100)
+            ));
+
+            when(cardRepository.findByEditionSetNumberAndCardNumber(6, 22)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            verify(cardRepository).save(localCard);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("1.25");
+        }
+
+        @Test
+        @DisplayName("runSync parses nested price with comma decimal")
+        void runSync_parsesNestedCommaPrice() {
+        Card mapped = card("mapped", null);
+
+        when(pricingSettingsService.isSyncEnabled()).thenReturn(true);
+        when(pricingSettingsService.getCursor()).thenReturn(PricingSettingsService.CursorState.initial());
+        when(pricingSettingsService.getMinuteLimit()).thenReturn(30);
+        when(pricingSettingsService.hasRemainingAttempts()).thenReturn(true, true, false);
+        when(pricingSettingsService.tryConsumeAttempt()).thenReturn(true, true, false);
+        when(pricingSettingsService.getProviderName()).thenReturn("rapidapi");
+        when(pricingSettingsService.getProviderCurrency()).thenReturn("EUR");
+        when(pricingSettingsService.getBudgetStatus()).thenReturn(Map.of(
+            "dailyBudget", 2,
+            "dailyHardLimit", 100,
+            "dailySafetyMargin", 0,
+            "effectiveDailyBudget", 2,
+            "minuteLimit", 30,
+            "usedAttempts", 2,
+            "remainingAttempts", 0
+        ));
+
+        when(cardRepository.countByMarketPriceIsNull()).thenReturn(1L);
+        when(cardRepository.countByLastPriceAtIsNotNull()).thenReturn(0L);
+        when(cardRepository.findByMarketPriceIsNotNullAndLastPriceAtBeforeOrderByLastPriceAtAscIdAsc(any(LocalDateTime.class)))
+            .thenReturn(List.of());
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 213L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+
+        Map<String, Object> providerRow = new LinkedHashMap<>();
+        providerRow.put("set_code", "TFC");
+        providerRow.put("card_number", 124);
+        providerRow.put("prices", Map.of(
+            "market", Map.of("eur", "1,23 €")
+        ));
+
+        when(pricingProviderClient.fetchEpisodeCardsPage(213L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(providerRow),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 124)).thenReturn(java.util.Optional.of(mapped));
+
+        Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+        assertThat(report.get("successCount")).isEqualTo(1);
+        assertThat(mapped.getMarketPrice()).isEqualByComparingTo("1.23");
+        }
+
     private static Map<String, Object> row(String setCode, int cardNumber, String marketPrice) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("set_code", setCode);

@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Comparator;
@@ -144,6 +145,7 @@ public class PricingSyncService {
                     if (episodeId == null || episodeId <= 0) {
                         continue;
                     }
+                    Integer episodeSetNumber = extractEpisodeSetNumber(episodePayload);
                     if (waitingResumeEpisode && resumeEpisodeId != episodeId) {
                         continue;
                     }
@@ -204,7 +206,7 @@ public class PricingSyncService {
                             break;
                         }
 
-                        MappingBatchResult mappingResult = applyPricingFromProviderRows(cardsPage.data(), statusCounts);
+                        MappingBatchResult mappingResult = applyPricingFromProviderRows(cardsPage.data(), episodeSetNumber, statusCounts);
                         processed += mappingResult.updatedCards;
                         successCount += mappingResult.updatedCards;
                         unresolvedMappings += mappingResult.unresolvedRows;
@@ -392,6 +394,7 @@ public class PricingSyncService {
     }
 
     private MappingBatchResult applyPricingFromProviderRows(List<Map<String, Object>> rows,
+                                                            Integer episodeSetNumber,
                                                             Map<String, Integer> statusCounts) {
         if (rows == null || rows.isEmpty()) {
             return new MappingBatchResult(0, 0, List.of(), List.of());
@@ -402,7 +405,7 @@ public class PricingSyncService {
         List<String> mappingSamples = new ArrayList<>();
         List<String> priceSamples = new ArrayList<>();
         for (Map<String, Object> row : rows) {
-            Optional<Card> maybeCard = resolveCard(row);
+            Optional<Card> maybeCard = resolveCard(row, episodeSetNumber);
             if (maybeCard.isEmpty()) {
                 unresolved++;
                 statusCounts.merge("UNRESOLVED_MAPPING", 1, Integer::sum);
@@ -457,7 +460,7 @@ public class PricingSyncService {
                 + ", price=" + (price == null ? "null" : String.valueOf(price));
     }
 
-    private Optional<Card> resolveCard(Map<String, Object> payload) {
+        private Optional<Card> resolveCard(Map<String, Object> payload, Integer episodeSetNumber) {
         String editionCode = normalizeText(firstPresent(payload,
                 "set_code", "setCode", "editionCode", "edition_code", "code"));
         Integer setNumber = parseInteger(firstPresent(payload,
@@ -474,20 +477,24 @@ public class PricingSyncService {
             }
         }
 
+        if (setNumber == null && episodeSetNumber != null && episodeSetNumber > 0) {
+            setNumber = episodeSetNumber;
+        }
+
         Integer cardNumber = parseInteger(firstPresent(payload,
                 "number", "card_number", "cardNumber", "collector_number", "card_num"));
-
-        if (editionCode != null && cardNumber != null) {
-            Optional<Card> byCodeNumber = cardRepository.findByEditionCodeAndCardNumber(editionCode, cardNumber);
-            if (byCodeNumber.isPresent()) {
-                return byCodeNumber;
-            }
-        }
 
         if (setNumber != null && cardNumber != null) {
             Optional<Card> bySetNumberAndCard = cardRepository.findByEditionSetNumberAndCardNumber(setNumber, cardNumber);
             if (bySetNumberAndCard.isPresent()) {
                 return bySetNumberAndCard;
+            }
+        }
+
+        if (editionCode != null && cardNumber != null) {
+            Optional<Card> byCodeNumber = cardRepository.findByEditionCodeAndCardNumber(editionCode, cardNumber);
+            if (byCodeNumber.isPresent()) {
+                return byCodeNumber;
             }
         }
 
@@ -500,45 +507,122 @@ public class PricingSyncService {
             }
         }
 
-        String name = normalizeText(firstPresent(payload, "name", "fullName", "card_name"));
-        if (name != null && cardNumber != null) {
-            List<Card> byNameAndNumber = cardRepository.findByCardNumberAndNameIgnoreCase(cardNumber, name);
-            if (byNameAndNumber.size() == 1) {
-                return Optional.of(byNameAndNumber.getFirst());
-            }
-        }
-
         return Optional.empty();
     }
 
     private BigDecimalPrice extractPriceFromRow(Map<String, Object> payload) {
-        Object value = firstPresent(payload,
-                "marketPrice", "market_price", "price", "value", "amount", "eur", "usd");
-        java.math.BigDecimal parsed = null;
-        if (value instanceof Number n) {
-            parsed = java.math.BigDecimal.valueOf(n.doubleValue()).setScale(2, java.math.RoundingMode.HALF_UP);
-        } else if (value instanceof String s) {
-            try {
-                parsed = new java.math.BigDecimal(s.trim()).setScale(2, java.math.RoundingMode.HALF_UP);
-            } catch (Exception ignored) {
-                parsed = null;
+        java.math.BigDecimal parsed = extractPriceNode(payload, false);
+        if (parsed != null) {
+            parsed = parsed.setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+        return new BigDecimalPrice(parsed);
+    }
+
+    private java.math.BigDecimal extractPriceNode(Object node, boolean fromLikelyPriceContext) {
+        if (node == null) {
+            return null;
+        }
+
+        if (node instanceof Number n) {
+            return fromLikelyPriceContext ? java.math.BigDecimal.valueOf(n.doubleValue()) : null;
+        }
+
+        if (node instanceof String s) {
+            return fromLikelyPriceContext ? parseDecimalString(s) : null;
+        }
+
+        if (node instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (!isLikelyPriceKey(key)) {
+                    continue;
+                }
+                java.math.BigDecimal direct = extractPriceNode(entry.getValue(), true);
+                if (direct != null) {
+                    return direct;
+                }
             }
-        } else {
-            Object pricingNode = payload.get("pricing");
-            if (pricingNode instanceof Map<?, ?> p) {
-                Object nestedValue = firstPresent(p, "marketPrice", "market_price", "price", "eur", "usd");
-                if (nestedValue instanceof Number n2) {
-                    parsed = java.math.BigDecimal.valueOf(n2.doubleValue()).setScale(2, java.math.RoundingMode.HALF_UP);
-                } else if (nestedValue instanceof String s2) {
-                    try {
-                        parsed = new java.math.BigDecimal(s2.trim()).setScale(2, java.math.RoundingMode.HALF_UP);
-                    } catch (Exception ignored) {
-                        parsed = null;
-                    }
+
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (!isLikelyPriceContainerKey(key)) {
+                    continue;
+                }
+                java.math.BigDecimal nested = extractPriceNode(entry.getValue(), true);
+                if (nested != null) {
+                    return nested;
                 }
             }
         }
-        return new BigDecimalPrice(parsed);
+
+        if (node instanceof List<?> list) {
+            for (Object item : list) {
+                java.math.BigDecimal nested = extractPriceNode(item, fromLikelyPriceContext);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static boolean isLikelyPriceKey(String key) {
+        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT);
+        return normalized.contains("marketprice")
+                || normalized.contains("market_price")
+                || normalized.equals("price")
+                || normalized.contains("price_")
+                || normalized.contains("_price")
+                || normalized.equals("value")
+                || normalized.equals("amount")
+                || normalized.equals("eur")
+                || normalized.equals("usd")
+                || normalized.equals("avg")
+                || normalized.equals("average")
+                || normalized.equals("median")
+                || normalized.equals("low")
+                || normalized.equals("high");
+    }
+
+    private static boolean isLikelyPriceContainerKey(String key) {
+        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT);
+        return normalized.contains("pricing")
+                || normalized.contains("prices")
+                || normalized.contains("cardmarket")
+                || normalized.equals("market")
+                || normalized.contains("tcgplayer")
+                || normalized.contains("shop");
+    }
+
+    private static java.math.BigDecimal parseDecimalString(String raw) {
+        if (raw == null) {
+            return null;
+        }
+
+        String cleaned = raw.trim();
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+
+        cleaned = cleaned.replaceAll("[^0-9,.-]", "");
+        if (cleaned.isEmpty() || cleaned.equals("-") || cleaned.equals(".") || cleaned.equals(",")) {
+            return null;
+        }
+
+        boolean hasComma = cleaned.contains(",");
+        boolean hasDot = cleaned.contains(".");
+        if (hasComma && hasDot) {
+            cleaned = cleaned.replace(",", "");
+        } else if (hasComma) {
+            cleaned = cleaned.replace(',', '.');
+        }
+
+        try {
+            return new java.math.BigDecimal(cleaned);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static Object firstPresent(Map<?, ?> map, String... keys) {
@@ -588,6 +672,21 @@ public class PricingSyncService {
                 return null;
             }
         }
+        return null;
+    }
+
+    private static Integer extractEpisodeSetNumber(Map<String, Object> episodePayload) {
+        Integer setNumber = parseInteger(firstPresent(episodePayload,
+                "set_num", "setNumber", "set_number", "number", "set_id"));
+        if (setNumber != null) {
+            return setNumber;
+        }
+
+        Object setNode = episodePayload.get("set");
+        if (setNode instanceof Map<?, ?> setMap) {
+            return parseInteger(firstPresent(setMap, "set_num", "setNumber", "set_number", "number", "id"));
+        }
+
         return null;
     }
 
