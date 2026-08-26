@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -66,6 +67,12 @@ class PricingInsightsServiceTest {
             dto.setMarketPrice(card.getMarketPrice());
             dto.setPriceCurrency(card.getPriceCurrency());
             dto.setLastPriceAt(card.getLastPriceAt());
+            UserCollection collection = invocation.getArgument(1, UserCollection.class);
+            if (collection != null) {
+                dto.setOwned(true);
+                dto.setQuantity(collection.getQuantity());
+                dto.setFoilQuantity(collection.getFoilQuantity());
+            }
             return dto;
         });
 
@@ -81,11 +88,55 @@ class PricingInsightsServiceTest {
         assertThat(result.getCurrency()).isEqualTo("EUR");
         assertThat(result.getLatestPricedCards()).hasSize(1);
         assertThat(result.getLatestPricedCards().get(0).getId()).isEqualTo(10L);
+        assertThat(result.getOwnedCardPriceRanking()).hasSize(1);
+        assertThat(result.getOwnedCardPriceRanking().get(0).getId()).isEqualTo(10L);
+        assertThat(result.getOwnedCardPriceRanking().get(0).getQuantity()).isEqualTo(2);
+        assertThat(result.getOwnedCardPriceRanking().get(0).getFoilQuantity()).isEqualTo(1);
         assertThat(result.getEditionValuations()).hasSize(1);
         assertThat(result.getEditionValuations().get(0).getTotalValueEur()).isEqualByComparingTo("7.50");
         assertThat(result.getTotalCollectionValueEur()).isEqualByComparingTo("7.50");
         assertThat(result.getExcludedNoPrice()).isEqualTo(1);
         assertThat(result.getExcludedNonEur()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("ranks eligible owned cards by unit price with stable ties and a 100-card cap")
+    void ranksOwnedCardsByUnitPriceWithTieBreakingAndCap() {
+        Edition tracked = edition(1L, "TFC", "Premier", 1);
+        List<UserCollection> ownedCards = new ArrayList<>();
+        ownedCards.add(collection(card(2L, tracked, new BigDecimal("100.00"), "EUR", LocalDateTime.now()), 1, 0));
+        ownedCards.add(collection(card(1L, tracked, new BigDecimal("100.00"), "EUR", LocalDateTime.now()), 1, 0));
+        for (long id = 3; id <= 102; id++) {
+            ownedCards.add(collection(card(id, tracked, BigDecimal.valueOf(103 - id), "EUR", LocalDateTime.now()), 1, 0));
+        }
+        ownedCards.add(collection(card(103L, tracked, new BigDecimal("200.00"), "USD", LocalDateTime.now()), 1, 0));
+        ownedCards.add(collection(card(104L, tracked, null, "EUR", LocalDateTime.now()), 1, 0));
+        ownedCards.add(collection(card(105L, tracked, new BigDecimal("150.00"), "EUR", LocalDateTime.now()), 0, 0));
+
+        when(statisticsService.resolveEnabledSetIds()).thenReturn(Set.of(1L));
+        when(editionRepository.findAll()).thenReturn(List.of(tracked));
+        when(cardRepository.findByLastPriceAtIsNotNullOrderByLastPriceAtDescIdDesc(any(Pageable.class)))
+                .thenReturn(List.of());
+        when(cardService.toDTO(any(Card.class), any())).thenAnswer(invocation -> {
+            Card card = invocation.getArgument(0, Card.class);
+            UserCollection collection = invocation.getArgument(1, UserCollection.class);
+            CardDTO dto = new CardDTO();
+            dto.setId(card.getId());
+            dto.setMarketPrice(card.getMarketPrice());
+            dto.setPriceCurrency(card.getPriceCurrency());
+            dto.setQuantity(collection != null ? collection.getQuantity() : 0);
+            dto.setFoilQuantity(collection != null ? collection.getFoilQuantity() : 0);
+            return dto;
+        });
+        when(collectionRepository.findAllWithCardAndEdition()).thenReturn(ownedCards);
+
+        PricingInsightsDTO result = service.getInsights();
+
+        assertThat(result.getOwnedCardPriceRanking()).hasSize(100);
+        assertThat(result.getOwnedCardPriceRanking().get(0).getId()).isEqualTo(1L);
+        assertThat(result.getOwnedCardPriceRanking().get(1).getId()).isEqualTo(2L);
+        assertThat(result.getOwnedCardPriceRanking())
+                .noneMatch(card -> List.of(103L, 104L, 105L).contains(card.getId()));
     }
 
     private static Edition edition(Long id, String code, String name, Integer setNumber) {

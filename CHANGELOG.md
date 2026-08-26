@@ -7,6 +7,19 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
+## [2.9.0]
+
+### Added
+
+- L'onglet Prix affiche un top des cartes possédées valorisées, trié par prix unitaire EUR décroissant, avec un sélecteur 20 / 50 / 100 et les quantités normal/foil à titre informatif.
+- La fiche d'une carte du top permet de supprimer son prix après confirmation, sans modifier les quantités possédées.
+
+### Changed
+
+- Les 20 dernières cartes du catalogue valorisées sont maintenant affichées en bas de l'onglet Prix.
+
+---
+
 ## [2.8.0]
 
 ### Added

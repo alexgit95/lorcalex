@@ -12,5 +12,6 @@ public class PricingInsightsDTO {
     private int excludedNoPrice;
     private int excludedNonEur;
     private List<CardDTO> latestPricedCards;
+    private List<CardDTO> ownedCardPriceRanking;
     private List<PricingEditionValuationDTO> editionValuations;
 }

@@ -32,6 +32,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 | **Statistiques** | Graphiques Chart.js (donut, barres empilées) : progression globale, par set, par rareté. |
 | **Scanner** | OCR caméra en continu : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, reprise rapide. |
 | **Derniers scans** | Onglet dédié : N dernières cartes ajoutées avec date/heure. Sélecteur 10 / 20 / 25 / 50. |
+| **Prix** | Valorisation EUR, top des cartes possédées par prix unitaire et suivi de l'évolution de collection. |
 | **Administration** | Sync LorcaJson (URL/fichier), sauvegarde/restauration complètes, import Lorcana Companion, gestion des clés API. |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion. |
 
@@ -363,11 +364,14 @@ Le mapping provider -> carte locale est déterministe : code d'édition + numér
 
 Un onglet `Prix` expose une vue opérationnelle en lecture seule:
 
-- Les 20 dernières cartes du catalogue ayant reçu un prix (`lastPriceAt` décroissant).
+- Le top des cartes possédées valorisées, trié par prix unitaire EUR décroissant. Le sélecteur permet d'afficher les 20, 50 ou 100 premières cartes ; les quantités normale et foil sont affichées sans influencer le rang.
 - La valorisation par édition suivie (même périmètre que `stats_enabled_sets`).
 - Le total global de valorisation collection en EUR.
 - Un graphique historique de la valeur totale de la collection calculé à chaque synchronisation pricing.
 - Un tableau par édition affichant la valeur courante et les écarts sur 7 jours et 30 jours.
+- Les 20 dernières cartes du catalogue ayant reçu un prix (`lastPriceAt` décroissant), en bas de l'onglet.
+
+Depuis la fiche d'une carte présente dans le top, l'action confirmée **Supprimer le prix** efface uniquement ses données de cotation. Les quantités normale et foil restent inchangées ; la carte est exclue de la valorisation et du top jusqu'à la prochaine synchronisation EUR.
 
 Règle de valorisation par carte:
 

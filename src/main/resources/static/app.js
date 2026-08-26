@@ -69,6 +69,7 @@ const api = {
   getStatistics: () => apiFetch('/statistics'),
 
   getPricingInsights: () => apiFetch('/pricing/insights'),
+  removeCardPrice: (cardId) => apiFetch(`/pricing/cards/${cardId}/price`, { method: 'DELETE' }),
   getTrend: () => apiFetch('/pricing/trend'),
   getEditionDeltas: () => apiFetch('/pricing/edition-deltas'),
 
@@ -286,6 +287,8 @@ function percentTone(value) {
 let recentCardsState = [];
 let recentLimit = 20;
 let pricingCardsState = [];
+let ownedPricingCardsState = [];
+let ownedPricingLimit = 20;
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
@@ -538,6 +541,38 @@ function pricingCardItemHTML(card) {
   </div>`;
 }
 
+function ownedPricingCardItemHTML(card) {
+  const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
+  const regularQuantity = card.quantity || 0;
+  const foilQuantity = card.foilQuantity || 0;
+  return `<div class="card-item owned" data-id="${card.id}">
+    ${card.imageUrl
+      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    <div class="owned-badge">${regularQuantity + foilQuantity}</div>
+    <div class="card-info">
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
+      <div class="card-name">${esc(card.name)}</div>
+      ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
+      <div style="font-size:.7rem;color:var(--accent);font-weight:700;margin-top:3px">${formatEuro(card.marketPrice)}</div>
+      <div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">Normal : ${regularQuantity} · Foil : ${foilQuantity}</div>
+    </div>
+  </div>`;
+}
+
+function renderOwnedPricingRanking() {
+  const area = document.getElementById('ownedPricingRanking');
+  if (!area) return;
+  const visibleCards = ownedPricingCardsState.slice(0, ownedPricingLimit);
+  area.innerHTML = visibleCards.length === 0
+    ? `<div class="empty-state" style="padding:24px 8px"><h3>Aucune carte possédée valorisée</h3><p>Le top s'affichera après les premières mises à jour de prix en EUR.</p></div>`
+    : `<div class="cards-grid">${visibleCards.map(c => ownedPricingCardItemHTML(c)).join('')}</div>`;
+  area.querySelectorAll('.card-item[data-id]').forEach(el => {
+    el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
+  });
+}
+
 function renderPricingPage() {
   document.getElementById('app').innerHTML = `
     <div class="app">
@@ -551,6 +586,7 @@ function renderPricingPage() {
 
   api.getPricingInsights().then(data => {
     pricingCardsState = data.latestPricedCards || [];
+    ownedPricingCardsState = data.ownedCardPriceRanking || [];
     const editionRows = (data.editionValuations || []).map(e => `
       <div class="edition-item">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -573,10 +609,13 @@ function renderPricingPage() {
       </div>
 
       <div class="chart-container" style="margin-bottom:10px">
-        <h3>20 dernières cartes du catalogue valorisées</h3>
-        ${pricingCardsState.length === 0
-          ? `<div class="empty-state" style="padding:24px 8px"><h3>Aucune carte valorisée</h3><p>La liste s'affichera après les premières mises à jour de prix en EUR.</p></div>`
-          : `<div class="cards-grid">${pricingCardsState.map(c => pricingCardItemHTML(c)).join('')}</div>`}
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+          <h3>Top de mes cartes par prix unitaire</h3>
+          <div class="filter-bar" id="ownedPricingLimitBar" style="margin:0">
+            ${[20, 50, 100].map(limit => `<button class="filter-chip${ownedPricingLimit === limit ? ' active' : ''}" data-limit="${limit}">${limit}</button>`).join('')}
+          </div>
+        </div>
+        <div id="ownedPricingRanking"></div>
       </div>
 
       <div class="chart-container" style="margin:10px 0 16px">
@@ -592,7 +631,25 @@ function renderPricingPage() {
       <div style="padding:0 12px 4px">
         <h3 style="color:var(--text-muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Valeur par édition suivie</h3>
         ${editionRows || `<div class="empty-state" style="padding:24px 8px"><h3>Aucune édition suivie</h3><p>Activez des sets dans l'administration pour voir les valorisations.</p></div>`}
+      </div>
+
+      <div class="chart-container" style="margin:10px 0 16px">
+        <h3>20 dernières cartes du catalogue valorisées</h3>
+        ${pricingCardsState.length === 0
+          ? `<div class="empty-state" style="padding:24px 8px"><h3>Aucune carte valorisée</h3><p>La liste s'affichera après les premières mises à jour de prix en EUR.</p></div>`
+          : `<div class="cards-grid">${pricingCardsState.map(c => pricingCardItemHTML(c)).join('')}</div>`}
       </div>`;
+
+    renderOwnedPricingRanking();
+    document.getElementById('ownedPricingLimitBar').addEventListener('click', event => {
+      const button = event.target.closest('[data-limit]');
+      if (!button) return;
+      ownedPricingLimit = parseInt(button.dataset.limit, 10);
+      document.querySelectorAll('#ownedPricingLimitBar .filter-chip').forEach(chip =>
+        chip.classList.toggle('active', parseInt(chip.dataset.limit, 10) === ownedPricingLimit)
+      );
+      renderOwnedPricingRanking();
+    });
 
     content.querySelectorAll('.card-item[data-id]').forEach(el => {
       el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
@@ -743,6 +800,7 @@ function renderRecentScansSection() {
 function openModal(cardId) {
   const card = collState.cards.find(c => c.id === cardId)
              || recentCardsState.find(c => c.id === cardId)
+             || ownedPricingCardsState.find(c => c.id === cardId)
              || pricingCardsState.find(c => c.id === cardId);
   if (!card) return;
   collState.modal = card;
@@ -767,6 +825,9 @@ function openModal(cardId) {
             ? `<div style="font-size:.85rem;font-weight:600;margin-bottom:12px;color:${RARITY_COLORS[card.rarity]||'var(--text-muted)'}">${esc(card.rarity)}</div>`
             : ''}
           ${priceMetadataHTML(card)}
+          ${card.owned && card.marketPrice != null && ownedPricingCardsState.some(c => c.id === card.id)
+            ? `<button class="btn btn-ghost btn-full" id="removeCardPriceBtn" style="margin-top:10px">Supprimer le prix</button>`
+            : ''}
 
           <div class="modal-qty-section">
             ${card.owned
@@ -807,6 +868,20 @@ function openModal(cardId) {
   });
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
   document.getElementById('modalContent').addEventListener('click', e => e.stopPropagation());
+
+  const removeCardPriceButton = document.getElementById('removeCardPriceBtn');
+  if (removeCardPriceButton) {
+    removeCardPriceButton.addEventListener('click', async () => {
+      if (!window.confirm(`Supprimer le prix de "${card.name}" ? Les quantités possédées ne seront pas modifiées.`)) return;
+      try {
+        await api.removeCardPrice(card.id);
+        closeModal();
+        renderPricingPage();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  }
 
   if (card.owned) {
     document.getElementById('qtyMinus').addEventListener('click', () => updateQtyRegular(card.id, card.quantity - 1));

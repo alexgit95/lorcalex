@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -78,11 +79,16 @@ class PricingInsightsIntegrationTest {
         Map<String, Object> payload = objectMapper.readValue(json, new TypeReference<>() {});
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> latest = (List<Map<String, Object>>) payload.get("latestPricedCards");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> ranking = (List<Map<String, Object>>) payload.get("ownedCardPriceRanking");
 
         assertThat(payload.get("currency")).isEqualTo("EUR");
         assertThat(latest).hasSize(2);
         assertThat(latest.get(0).get("name")).isEqualTo("Card newest");
         assertThat(latest.get(1).get("name")).isEqualTo("Card older");
+        assertThat(ranking).hasSize(2);
+        assertThat(ranking.get(0).get("name")).isEqualTo("Card newest");
+        assertThat(ranking.get(0).get("quantity")).isEqualTo(1);
     }
 
     @Test
@@ -114,6 +120,37 @@ class PricingInsightsIntegrationTest {
         assertThat(valuations.get(0).get("editionCode")).isEqualTo("TFC");
         assertThat(payload.get("totalCollectionValueEur")).isEqualTo(12.0);
         assertThat(payload.get("excludedNoPrice")).isEqualTo(1);
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("removing a price preserves normal and foil collection quantities")
+    void removePrice_preservesCollectionQuantities() throws Exception {
+        Edition edition = saveEdition("TFC", "Premier Chapitre", 1);
+        Card card = saveCard(edition, "priced", new BigDecimal("12.00"), "EUR", LocalDateTime.now());
+        saveCollection(card, 2, 1);
+
+        String json = mockMvc.perform(delete("/api/pricing/cards/{cardId}/price", card.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.marketPrice").doesNotExist())
+                .andExpect(jsonPath("$.quantity").value(2))
+                .andExpect(jsonPath("$.foilQuantity").value(1))
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> response = objectMapper.readValue(json, new TypeReference<>() {});
+        assertThat(response.get("marketPrice")).isNull();
+        assertThat(cardRepository.findById(card.getId()).orElseThrow().getMarketPrice()).isNull();
+        UserCollection collection = collectionRepository.findByCardId(card.getId()).orElseThrow();
+        assertThat(collection.getQuantity()).isEqualTo(2);
+        assertThat(collection.getFoilQuantity()).isEqualTo(1);
+
+        String insightsJson = mockMvc.perform(get("/api/pricing/insights"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> insights = objectMapper.readValue(insightsJson, new TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> ranking = (List<Map<String, Object>>) insights.get("ownedCardPriceRanking");
+        assertThat(ranking).isEmpty();
     }
 
     @Test

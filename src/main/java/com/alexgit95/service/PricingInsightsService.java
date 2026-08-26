@@ -10,10 +10,14 @@ import com.alexgit95.repository.CardRepository;
 import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +30,7 @@ public class PricingInsightsService {
     private static final String TARGET_CURRENCY = "EUR";
     private static final int LATEST_PRICED_FETCH_SIZE = 200;
     private static final int LATEST_PRICED_LIMIT = 20;
+    private static final int OWNED_CARD_PRICE_RANKING_LIMIT = 100;
 
     private final CardRepository cardRepository;
     private final UserCollectionRepository collectionRepository;
@@ -60,6 +65,7 @@ public class PricingInsightsService {
 
         int excludedNoPrice = 0;
         int excludedNonEur = 0;
+        List<CardDTO> ownedCardPriceRanking = new ArrayList<>();
 
         for (UserCollection uc : collectionRepository.findAllWithCardAndEdition()) {
             Card card = uc.getCard();
@@ -85,6 +91,8 @@ public class PricingInsightsService {
                 excludedNonEur++;
                 continue;
             }
+
+            ownedCardPriceRanking.add(cardService.toDTO(card, uc));
 
             PricingEditionValuationDTO dto = byEdition.get(edition.getId());
             if (dto == null) {
@@ -113,14 +121,40 @@ public class PricingInsightsService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
 
+            List<CardDTO> rankedOwnedCards = ownedCardPriceRanking.stream()
+                .sorted(Comparator
+                    .comparing(CardDTO::getMarketPrice, Comparator.reverseOrder())
+                    .thenComparing(CardDTO::getId))
+                .limit(OWNED_CARD_PRICE_RANKING_LIMIT)
+                .toList();
+
         PricingInsightsDTO dto = new PricingInsightsDTO();
         dto.setCurrency(TARGET_CURRENCY);
         dto.setTotalCollectionValueEur(total);
         dto.setExcludedNoPrice(excludedNoPrice);
         dto.setExcludedNonEur(excludedNonEur);
         dto.setLatestPricedCards(latestPricedCards);
+        dto.setOwnedCardPriceRanking(rankedOwnedCards);
         dto.setEditionValuations(valuations);
         return dto;
+    }
+
+    @Transactional
+    public CardDTO removePrice(Long cardId) {
+        Card card = cardRepository.findById(cardId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Carte introuvable"));
+        UserCollection collection = collectionRepository.findByCardId(cardId)
+                .filter(this::isOwned)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "La carte n'est pas possédée"));
+
+        card.setMarketPrice(null);
+        card.setPriceCurrency(null);
+        card.setPriceSource(null);
+        card.setLastPriceAt(null);
+        card.setLastPriceStatus(null);
+        cardRepository.save(card);
+
+        return cardService.toDTO(card, collection);
     }
 
     private Map<Long, PricingEditionValuationDTO> initTrackedEditions(Set<Long> enabledSetIds) {
@@ -145,6 +179,10 @@ public class PricingInsightsService {
         return card.getMarketPrice() != null
                 && card.getPriceCurrency() != null
                 && TARGET_CURRENCY.equalsIgnoreCase(card.getPriceCurrency());
+    }
+
+    private boolean isOwned(UserCollection collection) {
+        return safeInt(collection.getQuantity()) + safeInt(collection.getFoilQuantity()) > 0;
     }
 
     private static int safeInt(Integer value) {
