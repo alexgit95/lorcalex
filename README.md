@@ -14,6 +14,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 - [Import du catalogue](#import-du-catalogue-lorcajson)
 - [Collection](#collection--tri-et-affichage)
 - [Scanner OCR](#scanner-de-cartes-ocr-continu)
+- [Synchronisation des prix](#synchronisation-des-prix-des-cartes)
 - [Sauvegarde & Restauration](#sauvegarde--restauration-complètes)
 - [Clés API & Export programmable](#clés-api--export-programmable)
 - [Import Lorcana Companion](#import-depuis-lorcana-companion)
@@ -319,9 +320,98 @@ En fin d'import, le statut expose aussi un bloc structuré `details` contenant a
 
 La validation du format OCR `N/TOTAL • FR • SET` utilise désormais une borne `TOTAL` configurable via le setting `scanner_total_max`.
 
-- Valeur par défaut : `500`
-- Fallback : si la valeur est absente ou invalide, l'application revient à `500`
-- Plage acceptée : `2..999`
+---
+
+## Synchronisation des prix des cartes
+
+La valorisation des cartes est pilotée par une synchronisation de fond avec garde-fous stricts de quota.
+
+Le moteur de synchronisation parcourt désormais des endpoints paginés provider :
+
+- `GET /episodes?page=n`
+- `GET /episodes/{id}/cards?page=n&per_page=100`
+
+### Règles de quota
+
+- Le quota journalier est compté sur les **tentatives d'appel sortant** (pas sur les succès).
+- Une tentative consomme 1 unité, quel que soit le résultat provider (`2xx`, `4xx`, `5xx`, timeout, erreur réseau).
+- La garde journalière applique un **hard cap** (`pricing_daily_hard_limit`, max 100) et une marge de sécurité (`pricing_daily_safety_margin`).
+- Le budget effectif est `pricing_daily_hard_limit - pricing_daily_safety_margin`.
+- La limite minute (`pricing_minute_limit`) est strictement bornée à 30 appels/minute maximum.
+- Si `usedAttempts >= effectiveDailyBudget`, aucun appel supplémentaire n'est envoyé.
+- Le compteur est persisté (`pricing_usage_date`, `pricing_used_attempts`) pour rester fiable après redémarrage.
+
+### Stratégie de refresh
+
+- Priorité 1 : cartes sans `marketPrice`.
+- Priorité 2 : cartes avec prix mais `lastPriceAt` datant de plus de 7 jours.
+- Priorité 3 : le reste des cartes.
+
+Le mapping provider -> carte locale est déterministe : code d'édition + numéro de carte en priorité, puis fallback contrôlé sur `externalId`.
+
+### Exécution
+
+- Tâche planifiée quotidienne basée sur `pricing_schedule_cron` (modifiable en administration, sans redémarrage).
+- Si le cron est invalide, fallback automatique sur `0 0 2 * * *` avec statut de validité exposé.
+- Au démarrage, un rattrapage unique (`startup_catchup`) est déclenché si la journée courante n'a pas encore eu de run planifié.
+- Déclenchement manuel disponible via `POST /api/admin/pricing/run`.
+- Un curseur persistant (phase/page/episode) permet de reprendre la pagination après interruption ou redémarrage.
+- Statut opérationnel via `GET /api/admin/pricing/status` (hard cap, marge, budget effectif, minute limiter, curseur, raison d'arrêt, files de traitement, état du schedule et dernier run planifié).
+
+### Onglet Prix
+
+Un onglet `Prix` expose une vue opérationnelle en lecture seule:
+
+- Les 20 dernières cartes du catalogue ayant reçu un prix (`lastPriceAt` décroissant).
+- La valorisation par édition suivie (même périmètre que `stats_enabled_sets`).
+- Le total global de valorisation collection en EUR.
+
+Règle de valorisation par carte:
+
+- `(quantity + foilQuantity) x marketPrice`
+
+Contraintes monétaires:
+
+- Affichage et agrégats en EUR uniquement.
+- Les cartes sans prix (`marketPrice` null) ou avec devise non-EUR sont exclues des agrégats.
+- Le payload de l'onglet Prix expose des compteurs d'exclusion (`excludedNoPrice`, `excludedNonEur`).
+
+### Paramètres principaux
+
+Les clés de configuration pricing sont stockées dans `app_settings` et modifiables via les endpoints admin settings :
+
+- `pricing_sync_enabled`
+- `pricing_daily_hard_limit`
+- `pricing_daily_safety_margin`
+- `pricing_minute_limit`
+- `pricing_daily_budget`
+- `pricing_usage_date`
+- `pricing_used_attempts`
+- `pricing_schedule_cron`
+- `pricing_last_scheduled_run_date`
+- `pricing_provider`
+- `pricing_provider_host`
+- `pricing_provider_episodes_path`
+- `pricing_provider_episode_cards_path_template`
+- `pricing_provider_api_key`
+- `pricing_provider_currency`
+- `pricing_cursor_phase`
+- `pricing_cursor_episode_page`
+- `pricing_cursor_episode_id`
+- `pricing_cursor_episode_cards_page`
+- `pricing_last_stop_reason`
+
+### Import / Export et restauration
+
+Les sauvegardes et exports conservent les champs de valorisation :
+
+- `marketPrice`
+- `priceCurrency`
+- `priceSource`
+- `lastPriceAt`
+- `lastPriceStatus`
+
+La conservation de `lastPriceAt` est importante pour maintenir la priorisation de fraîcheur (stale > 7 jours) après restauration.
 
 ---
 

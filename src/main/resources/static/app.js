@@ -68,6 +68,8 @@ const api = {
 
   getStatistics: () => apiFetch('/statistics'),
 
+  getPricingInsights: () => apiFetch('/pricing/insights'),
+
   getSettings: () => apiFetch('/admin/settings'),
 
   updateSetting: (key, value) =>
@@ -93,6 +95,13 @@ const api = {
   getLorcaJsonUrl: () => apiFetch('/admin/lorcajson-url'),
 
   getProgress: () => apiFetch('/admin/progress'),
+
+  getPricingStatus: () => apiFetch('/admin/pricing/status'),
+
+  runPricingSync: (maxAttempts) => apiFetch('/admin/pricing/run', {
+    method: 'POST',
+    body: JSON.stringify(maxAttempts === undefined ? {} : { maxAttempts })
+  }),
 
   computeHashes: () => apiFetch('/admin/compute-hashes', { method: 'POST' }),
 
@@ -166,6 +175,7 @@ function renderPage(page) {
     case 'login':      renderLogin();           break;
     case 'collection': renderCollection();      break;
     case 'statistics': renderStatistics();      break;
+    case 'pricing':    renderPricingPage();     break;
     case 'scanner':    renderScanner();         break;
     case 'recent':     renderRecentScansPage(); break;
     case 'admin':      renderAdmin();           break;
@@ -189,6 +199,9 @@ function navHTML(active) {
     ${item('statistics',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zM16.2 13h2.8v6h-2.8v-6z"/></svg>`,
       'Stats')}
+    ${item('pricing',
+      `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5a10.5 10.5 0 1 0 10.5 10.5A10.51 10.51 0 0 0 12 1.5zm0 19a8.5 8.5 0 1 1 8.5-8.5 8.51 8.51 0 0 1-8.5 8.5zm1.2-8.9-1.9-.7c-.7-.2-.9-.5-.9-.9 0-.5.4-.9 1.1-.9.7 0 1.2.3 1.5.7l1.5-1.1A3.39 3.39 0 0 0 13 7.3V6h-2v1.3a3.01 3.01 0 0 0-2.7 3c0 1.6 1 2.4 2.6 3l1.8.7c.6.2.9.5.9 1 0 .6-.5 1-1.3 1-.8 0-1.5-.4-1.9-1l-1.6 1.1A4.18 4.18 0 0 0 11 17.7V19h2v-1.3a3.17 3.17 0 0 0 2.8-3.1c0-1.6-.9-2.5-2.6-3.1z"/></svg>`,
+      'Prix')}
     ${item('scanner',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 6.5v3h-3v-3h3M11 5H5v6h6V5zm-1.5 9.5v3h-3v-3h3M11 13H5v6h6v-6zm6.5-6.5v3h-3v-3h3M19 5h-6v6h6V5zm-6 8h1.5v1.5H13V13zm1.5 1.5H16V16h-1.5v-1.5zM16 13h1.5v1.5H16V13zm-3 3h1.5v1.5H13V16zm1.5 1.5H16V19h-1.5v-1.5zM16 16h1.5v1.5H16V16zm1.5-1.5H19V16h-1.5v-1.5zm0 3H19V19h-1.5v-1.5zM22 7h-2V4h-3V2h5v5zm0 15v-5h-2v3h-3v2h5zM2 22h5v-2H4v-3H2v5zM2 2v5h2V4h3V2H2z"/></svg>`,
       'Scanner')}
@@ -226,8 +239,19 @@ function formatDateTime(isoStr) {
     + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatEuro(value) {
+  const amount = typeof value === 'number' ? value : Number(value || 0);
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 let recentCardsState = [];
 let recentLimit = 20;
+let pricingCardsState = [];
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
@@ -461,6 +485,81 @@ function recentCardItemHTML(card) {
   </div>`;
 }
 
+function pricingCardItemHTML(card) {
+  const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
+  const priceLabel = card.marketPrice != null ? formatEuro(card.marketPrice) : 'N/A';
+  const pricedAt = card.lastPriceAt ? formatDateTime(card.lastPriceAt) : '';
+  return `<div class="card-item" data-id="${card.id}">
+    ${card.imageUrl
+      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    <div class="card-info">
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
+      <div class="card-name">${esc(card.name)}</div>
+      ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
+      <div style="font-size:.7rem;color:var(--accent);font-weight:700;margin-top:3px">${priceLabel}</div>
+      ${pricedAt ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">🕐 ${pricedAt}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderPricingPage() {
+  document.getElementById('app').innerHTML = `
+    <div class="app">
+      <div class="page">
+        <div class="page-header"><h1>💶 Prix</h1></div>
+        <div id="pricingTabContent">${loadingHTML()}</div>
+      </div>
+      ${navHTML('pricing')}
+    </div>
+    <div id="modalArea"></div>`;
+
+  api.getPricingInsights().then(data => {
+    pricingCardsState = data.latestPricedCards || [];
+    const editionRows = (data.editionValuations || []).map(e => `
+      <div class="edition-item">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h3>${esc(e.editionName || '')}</h3>
+            <div class="edition-code">${esc(e.editionCode || '')}</div>
+          </div>
+          <span style="color:var(--accent);font-weight:700">${formatEuro(e.totalValueEur || 0)}</span>
+        </div>
+      </div>`).join('');
+
+    const content = document.getElementById('pricingTabContent');
+    if (!content) return;
+
+    content.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value">${formatEuro(data.totalCollectionValueEur || 0)}</div><div class="stat-label">Valeur totale (EUR)</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${data.excludedNoPrice ?? 0}</div><div class="stat-label">Exclues sans prix</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${data.excludedNonEur ?? 0}</div><div class="stat-label">Exclues non EUR</div></div>
+      </div>
+
+      <div class="chart-container" style="margin-bottom:10px">
+        <h3>20 dernières cartes du catalogue valorisées</h3>
+        ${pricingCardsState.length === 0
+          ? `<div class="empty-state" style="padding:24px 8px"><h3>Aucune carte valorisée</h3><p>La liste s'affichera après les premières mises à jour de prix en EUR.</p></div>`
+          : `<div class="cards-grid">${pricingCardsState.map(c => pricingCardItemHTML(c)).join('')}</div>`}
+      </div>
+
+      <div style="padding:0 12px 4px">
+        <h3 style="color:var(--text-muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Valeur par édition suivie</h3>
+        ${editionRows || `<div class="empty-state" style="padding:24px 8px"><h3>Aucune édition suivie</h3><p>Activez des sets dans l'administration pour voir les valorisations.</p></div>`}
+      </div>`;
+
+    content.querySelectorAll('.card-item[data-id]').forEach(el => {
+      el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
+    });
+  }).catch(err => {
+    const content = document.getElementById('pricingTabContent');
+    if (!content) return;
+    content.innerHTML = `<div class="empty-state"><h3>Erreur</h3><p>${esc(err.message)}</p></div>`;
+  });
+}
+
 function renderRecentScansPage() {
   document.getElementById('app').innerHTML = `
     <div class="app">
@@ -523,7 +622,8 @@ function renderRecentScansSection() {
 
 function openModal(cardId) {
   const card = collState.cards.find(c => c.id === cardId)
-             || recentCardsState.find(c => c.id === cardId);
+             || recentCardsState.find(c => c.id === cardId)
+             || pricingCardsState.find(c => c.id === cardId);
   if (!card) return;
   collState.modal = card;
 
@@ -757,7 +857,8 @@ async function updateQty(cardId, qty) {
 async function updateQtyRegular(cardId, qty) {
   const sourceCard = collState.cards.find(c => c.id === cardId)
                   || (collState.modal?.id === cardId ? collState.modal : null)
-                  || recentCardsState.find(c => c.id === cardId);
+                  || recentCardsState.find(c => c.id === cardId)
+                  || pricingCardsState.find(c => c.id === cardId);
   if (!sourceCard) return;
   const foilQty = sourceCard.foilQuantity || 0;
   let updated;
@@ -768,6 +869,7 @@ async function updateQtyRegular(cardId, qty) {
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
+  pricingCardsState = pricingCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
   renderRecentScansSection();
@@ -777,7 +879,8 @@ async function updateQtyRegular(cardId, qty) {
 async function updateQtyFoiled(cardId, qty) {
   const sourceCard = collState.cards.find(c => c.id === cardId)
                   || (collState.modal?.id === cardId ? collState.modal : null)
-                  || recentCardsState.find(c => c.id === cardId);
+                  || recentCardsState.find(c => c.id === cardId)
+                  || pricingCardsState.find(c => c.id === cardId);
   if (!sourceCard) return;
   const regQty = sourceCard.quantity || 0;
   let updated;
@@ -788,6 +891,7 @@ async function updateQtyFoiled(cardId, qty) {
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
+  pricingCardsState = pricingCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
   renderRecentScansSection();
@@ -1619,7 +1723,7 @@ function updateAdminProgress(p) {
 }
 
 function setSyncBusy(busy) {
-  ['syncUrlBtn'].forEach(id => {
+  ['syncUrlBtn', 'pricingRunBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = busy;
   });
@@ -1651,10 +1755,30 @@ function renderAdmin() {
     navigate('login');
   });
 
-  Promise.all([api.getSettings(), api.getLorcaJsonUrl(), api.getProgress(), api.getEditions()]).then(([settings, urlData, progressData, editions]) => {
+  Promise.all([
+    api.getSettings(),
+    api.getLorcaJsonUrl(),
+    api.getProgress(),
+    api.getEditions(),
+    api.getPricingStatus().catch(() => null),
+  ]).then(([settings, urlData, progressData, editions, pricingStatus]) => {
     const content = document.getElementById('adminContent');
     if (!content) return;
     const currentUrl = urlData.url || 'https://lorcanajson.org/files/current/fr/allCards.json';
+    const settingVal = (key, fallback = '') => {
+      const row = settings.find(s => s.settingKey === key);
+      return row && row.settingValue != null ? String(row.settingValue) : fallback;
+    };
+    const pricingSyncEnabled = settingVal('pricing_sync_enabled', 'true');
+    const pricingDailyHardLimit = settingVal('pricing_daily_hard_limit', settingVal('pricing_daily_budget', '100'));
+    const pricingDailySafetyMargin = settingVal('pricing_daily_safety_margin', '5');
+    const pricingMinuteLimit = settingVal('pricing_minute_limit', '30');
+    const pricingProviderHost = settingVal('pricing_provider_host', 'lorcana-api-by-tcggo.p.rapidapi.com');
+    const pricingProviderEpisodesPath = settingVal('pricing_provider_episodes_path', '/episodes');
+    const pricingProviderEpisodeCardsPathTemplate = settingVal('pricing_provider_episode_cards_path_template', '/episodes/{episodeId}/cards');
+    const pricingProviderCurrency = settingVal('pricing_provider_currency', 'EUR');
+    const pricingProviderApiKey = settingVal('pricing_provider_api_key', '');
+    const pricingScheduleCron = settingVal('pricing_schedule_cron', '0 0 2 * * *');
 
     const statsSetsSetting = settings.find(s => s.settingKey === 'stats_enabled_sets');
     const savedStatsSetIds = statsSetsSetting
@@ -1693,6 +1817,101 @@ function renderAdmin() {
 
       <!-- Progression -->
       <div id="adminProgressBox" class="edition-item" style="margin-bottom:12px;display:none"></div>
+
+      <!-- Pricing sync -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">💶 Synchronisation des prix</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Limites strictes: jamais plus de 100 appels/jour et jamais plus de 30 appels/minute. Priorité: sans prix, prix > 7 jours, puis le reste.
+        </p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Sync activée</span>
+            <select id="pricingSyncEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingSyncEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingSyncEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Hard cap journalier (max 100)</span>
+            <input id="pricingDailyHardLimit" type="number" min="0" max="100" value="${esc(pricingDailyHardLimit)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Marge de sécurité quotidienne</span>
+            <input id="pricingDailySafetyMargin" type="number" min="0" max="100" value="${esc(pricingDailySafetyMargin)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Limite minute (max 30)</span>
+            <input id="pricingMinuteLimit" type="number" min="1" max="30" value="${esc(pricingMinuteLimit)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Provider host</span>
+            <input id="pricingProviderHost" type="text" value="${esc(pricingProviderHost)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Provider episodes path</span>
+            <input id="pricingProviderEpisodesPath" type="text" value="${esc(pricingProviderEpisodesPath)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Provider episode cards path template</span>
+            <input id="pricingProviderEpisodeCardsPathTemplate" type="text" value="${esc(pricingProviderEpisodeCardsPathTemplate)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Devise cible</span>
+            <input id="pricingProviderCurrency" type="text" value="${esc(pricingProviderCurrency)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Cron quotidien</span>
+            <input id="pricingScheduleCron" type="text" value="${esc(pricingScheduleCron)}"
+              placeholder="0 0 2 * * *"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">API key RapidAPI</span>
+            <input id="pricingProviderApiKey" type="password" value="${esc(pricingProviderApiKey)}"
+              placeholder="Renseigner la clé provider"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+          <button class="btn btn-accent" id="pricingSaveBtn">💾 Enregistrer</button>
+          <button class="btn btn-ghost" id="pricingRefreshStatusBtn">🔄 Rafraîchir statut</button>
+          <button class="btn btn-ghost" id="pricingRunBtn">▶️ Lancer maintenant</button>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted);margin:0">Max appels run manuel</label>
+          <input id="pricingMaxAttempts" type="number" min="1" placeholder="illimité"
+            style="width:120px;border-radius:8px;padding:6px 8px" />
+        </div>
+
+        <div id="pricingStatusBox" style="font-size:.84rem;color:var(--text-muted);background:var(--bg-card2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px"></div>
+        <div id="pricingSettingsResult"></div>
+      </div>
 
       <!-- Sauvegarde / Restauration complètes -->
       <div class="edition-item" style="margin-bottom:12px">
@@ -1807,6 +2026,126 @@ function renderAdmin() {
       setSyncBusy(true);
       startSyncPoll();
     }
+
+    function renderPricingStatus(status) {
+      const box = document.getElementById('pricingStatusBox');
+      if (!box) return;
+      if (!status) {
+        box.innerHTML = 'Statut pricing indisponible.';
+        return;
+      }
+      const lines = [
+        `Sync activée: ${status.syncEnabled ? 'oui' : 'non'}`,
+        `Hard cap: ${status.dailyHardLimit ?? 0}`,
+        `Marge sécurité: ${status.dailySafetyMargin ?? 0}`,
+        `Budget effectif: ${status.effectiveDailyBudget ?? status.dailyBudget ?? 0}`,
+        `Consommé: ${status.usedAttempts ?? 0}`,
+        `Restant: ${status.remainingAttempts ?? 0}`,
+        `Limite minute (effective): ${status.minuteLimit ?? 30}`,
+        `Date usage: ${esc(status.usageDate ?? '')}`,
+        `Cron configuré: ${esc(status.scheduleCron ?? '')}`,
+        `Cron effectif: ${esc(status.scheduleEffectiveCron ?? '')}`,
+        `Cron valide: ${status.scheduleValid ? 'oui' : 'non (fallback)'}`,
+        `Prochain run: ${esc(status.scheduleNextRun ?? '')}`,
+        `Dernier run planifié: ${esc(status.lastScheduledRunDate ?? '')}`,
+        `Provider: ${esc(status.provider ?? '')}`,
+        `Provider configuré: ${status.providerConfigured ? 'oui' : 'non'}`,
+        `Episodes path: ${esc(status.providerEpisodesPath ?? '')}`,
+        `Episode cards path: ${esc(status.providerEpisodeCardsPathTemplate ?? '')}`,
+        `En cours: ${status.running ? 'oui' : 'non'}`,
+        `Queue sans prix: ${status.queueWithoutPrice ?? 0}`,
+        `Queue stale > 7j: ${status.queueStaleOver7Days ?? 0}`,
+        `Queue avec prix: ${status.queueWithPrice ?? 0}`,
+        `Curseur: ${esc(JSON.stringify(status.cursor || {}))}`,
+        `Dernier stop: ${esc(status.lastStopReason ?? status.stopReason ?? '')}`,
+      ];
+      box.innerHTML = lines.map(line => `<div>${line}</div>`).join('');
+    }
+
+    async function refreshPricingStatus() {
+      try {
+        const status = await api.getPricingStatus();
+        renderPricingStatus(status);
+      } catch (err) {
+        showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur statut pricing : ' + err.message });
+      }
+    }
+
+    renderPricingStatus(pricingStatus);
+
+    document.getElementById('pricingRefreshStatusBtn').addEventListener('click', refreshPricingStatus);
+
+    document.getElementById('pricingSaveBtn').addEventListener('click', async () => {
+      const syncEnabled = document.getElementById('pricingSyncEnabled').value;
+      const dailyHardLimit = document.getElementById('pricingDailyHardLimit').value.trim();
+      const dailySafetyMargin = document.getElementById('pricingDailySafetyMargin').value.trim();
+      const minuteLimit = document.getElementById('pricingMinuteLimit').value.trim();
+      const providerHost = document.getElementById('pricingProviderHost').value.trim();
+      const providerEpisodesPath = document.getElementById('pricingProviderEpisodesPath').value.trim();
+      const providerEpisodeCardsPathTemplate = document.getElementById('pricingProviderEpisodeCardsPathTemplate').value.trim();
+      const providerCurrency = document.getElementById('pricingProviderCurrency').value.trim();
+      const scheduleCron = document.getElementById('pricingScheduleCron').value.trim();
+      const providerApiKey = document.getElementById('pricingProviderApiKey').value.trim();
+
+      try {
+        await Promise.all([
+          api.updateSetting('pricing_sync_enabled', syncEnabled),
+          api.updateSetting('pricing_daily_hard_limit', dailyHardLimit || '100'),
+          api.updateSetting('pricing_daily_budget', dailyHardLimit || '100'),
+          api.updateSetting('pricing_daily_safety_margin', dailySafetyMargin || '0'),
+          api.updateSetting('pricing_minute_limit', minuteLimit || '30'),
+          api.updateSetting('pricing_provider_host', providerHost),
+          api.updateSetting('pricing_provider_episodes_path', providerEpisodesPath || '/episodes'),
+          api.updateSetting('pricing_provider_episode_cards_path_template', providerEpisodeCardsPathTemplate || '/episodes/{episodeId}/cards'),
+          api.updateSetting('pricing_provider_currency', providerCurrency),
+          api.updateSetting('pricing_schedule_cron', scheduleCron || '0 0 2 * * *'),
+          api.updateSetting('pricing_provider_api_key', providerApiKey),
+        ]);
+        showAdminResult('pricingSettingsResult', { success: true, message: 'Paramètres pricing enregistrés.' });
+        refreshPricingStatus();
+      } catch (err) {
+        showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur sauvegarde pricing : ' + err.message });
+      }
+    });
+
+    document.getElementById('pricingRunBtn').addEventListener('click', async () => {
+      const rawMax = document.getElementById('pricingMaxAttempts').value.trim();
+      const maxAttempts = rawMax ? parseInt(rawMax, 10) : undefined;
+      setSyncBusy(true);
+      try {
+        const result = await api.runPricingSync(Number.isFinite(maxAttempts) ? maxAttempts : undefined);
+        const statusCounts = result.statusCounts && typeof result.statusCounts === 'object'
+          ? Object.entries(result.statusCounts).map(([k, v]) => `${k}:${v}`).join(', ')
+          : '';
+        const details = [
+          `Appels: ${result.attempted ?? 0}`,
+          `Pages episodes: ${result.episodePagesProcessed ?? 0}`,
+          `Pages cartes: ${result.episodeCardsPagesProcessed ?? 0}`,
+          `Succès: ${result.successCount ?? 0}`,
+          `Non résolues: ${result.unresolvedCount ?? 0}`,
+          `Erreurs: ${result.errorCount ?? 0}`,
+          `Restant: ${result.remainingAttempts ?? 0}`,
+          `File sans prix: ${result.queueWithoutPrice ?? 0}`,
+          `File stale > 7j: ${result.queueStaleOver7Days ?? 0}`,
+          `File avec prix: ${result.queueWithPrice ?? 0}`,
+          `Stop: ${result.stopReason ?? result.reasonCode ?? ''}`,
+          statusCounts ? `Statuts: ${statusCounts}` : '',
+        ].join(' | ');
+        const defaultMessage = `Run pricing terminé. ${details}`;
+        const isBudgetExhausted = result.reasonCode === 'BUDGET_EXHAUSTED' || result.reasonCode === 'BUDGET_EXHAUSTED_AFTER_ATTEMPTS';
+        const isProviderConfigMissing = result.reasonCode === 'PROVIDER_CONFIG_MISSING';
+        showAdminResult('pricingSettingsResult', {
+          success: !!result.started,
+          level: (isBudgetExhausted || isProviderConfigMissing) ? 'warning' : undefined,
+          message: result.message ? `${result.message} (${details})` : defaultMessage
+        });
+        await refreshPricingStatus();
+      } catch (err) {
+        showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur run pricing : ' + err.message });
+      } finally {
+        setSyncBusy(false);
+      }
+    });
 
     // ── API Keys ──────────────────────────────────────────────────────────
     const apiKeysSection = document.getElementById('apiKeysSection');
@@ -2082,8 +2421,10 @@ function renderAdmin() {
 function showAdminResult(elementId, result) {
   const el = document.getElementById(elementId);
   if (!el) return;
-  el.innerHTML = `<div class="alert ${result.success ? 'alert-success' : 'alert-error'}">${esc(result.message)}</div>`;
-  if (result.success) {
+  const level = result.level || (result.success ? 'success' : 'error');
+  const klass = level === 'warning' ? 'alert-warning' : (level === 'success' ? 'alert-success' : 'alert-error');
+  el.innerHTML = `<div class="alert ${klass}">${esc(result.message)}</div>`;
+  if (level === 'success') {
     setTimeout(() => { if (el) el.innerHTML = ''; }, 6000);
   }
 }

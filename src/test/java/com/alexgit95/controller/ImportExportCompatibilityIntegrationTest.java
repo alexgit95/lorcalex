@@ -103,4 +103,35 @@ class ImportExportCompatibilityIntegrationTest {
         ApiKey key = apiKeyRepository.findByKeyHash(hash).orElseThrow();
         assertThat(key.getLastUsedAt()).isNotNull();
     }
+
+    @Test
+    @WithMockUser
+    @DisplayName("current fixture preserves pricing fields through restore and export")
+    void restoreThenExport_preservesPricingFields() throws Exception {
+        String payload = new ClassPathResource("compat/backup-v2-current-minimal.json")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        mockMvc.perform(post("/api/admin/restore")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk());
+
+        Map<String, Object> gen = apiKeyService.generateKey("compat-pricing", LocalDateTime.now().plusDays(1));
+        String rawKey = (String) gen.get("key");
+
+        String json = mockMvc.perform(get("/api/export").param("apiKey", rawKey))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> export = objectMapper.readValue(json, new TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        java.util.List<Map<String, Object>> cards = (java.util.List<Map<String, Object>>) export.get("cards");
+
+        assertThat(cards).hasSize(1);
+        assertThat(cards.get(0)).containsKeys(
+                "marketPrice", "priceCurrency", "priceSource", "lastPriceAt", "lastPriceStatus");
+        assertThat(cards.get(0).get("priceCurrency")).isEqualTo("EUR");
+        assertThat(cards.get(0).get("priceSource")).isEqualTo("rapidapi-lorcana-prices");
+        assertThat(cards.get(0).get("lastPriceStatus")).isEqualTo("SUCCESS");
+    }
 }

@@ -7,6 +7,63 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
+## [2.7.0] - Sync pricing paginee par sets et limites API strictes
+
+### Added
+
+- Synchronisation pricing provider en pagination par sets (`/episodes`) puis pagination cartes par set (`/episodes/{id}/cards?page=n&per_page=100`).
+- Curseur persistant de reprise (`phase`, `episodePage`, `episodeId`, `episodeCardsPage`) pour continuer un run partiel sur les runs suivants.
+- Nouvelles cles de parametrage admin pour hard cap journalier, marge de securite, limite minute, endpoints provider pagines et telemetrie d'arret.
+
+### Changed
+
+- Gouvernance des appels provider en double garde stricte: jamais plus de 100 appels/jour (hard cap) et jamais plus de 30 appels/minute.
+- Budget operationnel derive du hard cap via `effectiveDailyBudget = dailyHardLimit - dailySafetyMargin`.
+- Chaque requete sortante provider est comptee (y compris reponses non-2xx et erreurs), afin de respecter le plafond quotidien strict.
+- Priorisation de mise a jour pricing revisee: cartes sans prix d'abord, puis cartes dont le prix date de plus de 7 jours, puis le reste.
+- Payload de statut pricing enrichi avec hard cap, marge, budget effectif, limite minute, curseur courant et derniere raison d'arret.
+
+---
+
+## [2.6.0] - Onglet Prix et valorisation EUR par édition suivie
+
+### Added
+
+- Nouvel endpoint JWT `GET /api/pricing/insights` pour alimenter la vue Prix.
+- Nouvel onglet `Prix` avec:
+	- 20 dernières cartes du catalogue valorisées (`lastPriceAt` décroissant)
+	- valorisation collection par édition suivie
+	- total global de valorisation en EUR
+- Compteurs d'exclusion de valorisation: cartes sans prix et cartes non-EUR.
+
+### Changed
+
+- Règle de valorisation collection formalisée: `(quantity + foilQuantity) x marketPrice`.
+- Périmètre des éditions valorisées aligné sur le filtre `stats_enabled_sets` du module Statistiques.
+- Affichage monétaire normalisé en EUR pour la vue Prix.
+
+---
+
+## [2.5.0] - Synchronisation pricing avec quota journalier par tentative
+
+### Added
+
+- Moteur de synchronisation pricing avec exécution planifiée quotidienne et déclenchement manuel admin.
+- Endpoint de statut pricing (`/api/admin/pricing/status`) avec budget, consommation et files de traitement.
+- Client provider RapidAPI avec mapping déterministe basé sur les identifiants carte (nom, numéro, set, externalId).
+- Compteurs persistés de quota journalier (`pricing_usage_date`, `pricing_used_attempts`) pour garantir la sécurité après redémarrage.
+- Tests unitaires et d'intégration sur quota, priorisation, rollover et persistance de consommation.
+
+### Changed
+
+- Stratégie de refresh pricing : cartes sans valorisation d'abord, puis cartes les plus anciennes (`lastPriceAt` ascendant).
+- Politique de comptage: chaque tentative d'appel provider consomme une unité de quota, y compris en erreur (ex: HTTP 429).
+- Contrat import/export et sauvegarde étendu avec les champs pricing (`marketPrice`, `priceCurrency`, `priceSource`, `lastPriceAt`, `lastPriceStatus`) pour préserver la stratégie de refresh après restauration.
+- Planification pricing rendue dynamique via `pricing_schedule_cron` avec reconfiguration à chaud après mise à jour admin.
+- Ajout d'un rattrapage startup quotidien unique basé sur `pricing_last_scheduled_run_date` pour couvrir les runs manqués quand l'application était arrêtée.
+
+---
+
 ## [2.4.0] - Gouvernance OpenSpec et compatibilité import/export
 
 ### Added

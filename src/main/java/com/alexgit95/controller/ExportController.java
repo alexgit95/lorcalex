@@ -74,6 +74,11 @@ public class ExportController {
                     m.put("artist", c.getArtist());
                     m.put("inkable", c.getInkable());
                     m.put("imageHash", c.getImageHash());
+                    m.put("marketPrice", c.getMarketPrice());
+                    m.put("priceCurrency", c.getPriceCurrency());
+                    m.put("priceSource", c.getPriceSource());
+                    m.put("lastPriceAt", c.getLastPriceAt() != null ? c.getLastPriceAt().toString() : null);
+                    m.put("lastPriceStatus", c.getLastPriceStatus());
                     return m;
                 }).collect(Collectors.toList());
 

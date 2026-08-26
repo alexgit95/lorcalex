@@ -117,6 +117,11 @@ public class CardService {
         dto.setImageUrl(card.getImageUrl());
         dto.setArtist(card.getArtist());
         dto.setInkable(card.getInkable());
+        dto.setMarketPrice(card.getMarketPrice());
+        dto.setPriceCurrency(card.getPriceCurrency());
+        dto.setPriceSource(card.getPriceSource());
+        dto.setLastPriceAt(card.getLastPriceAt());
+        dto.setLastPriceStatus(card.getLastPriceStatus());
         if (card.getEdition() != null) {
             dto.setEditionId(card.getEdition().getId());
             dto.setEditionName(card.getEdition().getName());

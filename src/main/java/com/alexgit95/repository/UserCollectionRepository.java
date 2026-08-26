@@ -35,6 +35,9 @@ public interface UserCollectionRepository extends JpaRepository<UserCollection, 
     @Query("SELECT uc FROM UserCollection uc JOIN FETCH uc.card")
     List<UserCollection> findAllWithCard();
 
+    @Query("SELECT uc FROM UserCollection uc JOIN FETCH uc.card c LEFT JOIN FETCH c.edition")
+    List<UserCollection> findAllWithCardAndEdition();
+
     @Query("SELECT uc FROM UserCollection uc JOIN FETCH uc.card c LEFT JOIN FETCH c.edition ORDER BY uc.lastAddedAt DESC")
     List<UserCollection> findRecentWithCard(Pageable pageable);
 }

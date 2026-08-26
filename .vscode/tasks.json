@@ -20,6 +20,18 @@
 				"$java"
 			],
 			"group": "test"
+		},
+		{
+			"label": "Maven Local Tests (USINE_LOGICIELLE)",
+			"type": "shell",
+			"command": "C:\\USINE_LOGICIELLE\\apache-maven\\bin\\mvn.cmd",
+			"args": [
+				"-B",
+				"-Dtest=PricingSyncServiceTest,ImportExportCompatibilityUnitTest,BackupRestoreIntegrationTest,ImportExportCompatibilityIntegrationTest",
+				"test"
+			],
+			"isBackground": false,
+			"group": "test"
 		}
 	]
 }

@@ -21,6 +21,7 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -163,6 +164,66 @@ class BackupRestoreIntegrationTest {
         assertThat(coll).hasSize(1);
         assertThat(coll.get(0).get("foilQuantity")).isEqualTo(4);
         assertThat(coll.get(0).get("foil")).isEqualTo(true);
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("backup includes pricing value and last price timestamp")
+    void backup_includesPricingMetadata() throws Exception {
+        Edition ed = saveEdition("TFC", "Premier Chapitre", 1);
+        Card card = saveCard("Elsa", 1, "ext-price-bk", ed);
+        card.setMarketPrice(new BigDecimal("9.95"));
+        card.setPriceCurrency("EUR");
+        card.setPriceSource("rapidapi-lorcana-prices");
+        LocalDateTime lastPriceAt = LocalDateTime.of(2026, 8, 25, 9, 30, 0);
+        card.setLastPriceAt(lastPriceAt);
+        card.setLastPriceStatus("SUCCESS");
+        cardRepository.save(card);
+
+        String json = mockMvc.perform(get("/api/admin/backup"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> backup = objectMapper.readValue(json, new tools.jackson.core.type.TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cards = (List<Map<String, Object>>) backup.get("cards");
+
+        assertThat(cards).hasSize(1);
+        assertThat(cards.get(0).get("marketPrice")).isEqualTo(9.95);
+        assertThat(cards.get(0).get("priceCurrency")).isEqualTo("EUR");
+        assertThat(cards.get(0).get("priceSource")).isEqualTo("rapidapi-lorcana-prices");
+        assertThat(cards.get(0).get("lastPriceAt")).isEqualTo(lastPriceAt.toString());
+        assertThat(cards.get(0).get("lastPriceStatus")).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("restore preserves pricing value and last price timestamp")
+    void restore_preservesPricingMetadata() throws Exception {
+        LocalDateTime first = LocalDateTime.of(2025, 1, 1, 10, 0, 0);
+        LocalDateTime lastPriceAt = LocalDateTime.of(2026, 8, 25, 9, 30, 0);
+        Map<String, Object> payload = buildPayload("ext-price-rs", "TFC", "Premier Chapitre", 1, 1, false, first);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cards = (List<Map<String, Object>>) payload.get("cards");
+        cards.get(0).put("marketPrice", 12.50);
+        cards.get(0).put("priceCurrency", "EUR");
+        cards.get(0).put("priceSource", "rapidapi-lorcana-prices");
+        cards.get(0).put("lastPriceAt", lastPriceAt.toString());
+        cards.get(0).put("lastPriceStatus", "SUCCESS");
+
+        mockMvc.perform(post("/api/admin/restore")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        Card restored = cardRepository.findByExternalId("ext-price-rs").orElseThrow();
+        assertThat(restored.getMarketPrice()).isEqualByComparingTo("12.5");
+        assertThat(restored.getPriceCurrency()).isEqualTo("EUR");
+        assertThat(restored.getPriceSource()).isEqualTo("rapidapi-lorcana-prices");
+        assertThat(restored.getLastPriceAt().withNano(0)).isEqualTo(lastPriceAt.withNano(0));
+        assertThat(restored.getLastPriceStatus()).isEqualTo("SUCCESS");
     }
 
     private Edition saveEdition(String code, String name, int setNumber) {

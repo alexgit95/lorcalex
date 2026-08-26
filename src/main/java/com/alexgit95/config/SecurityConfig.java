@@ -46,7 +46,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/export").hasRole("API")
                 .requestMatchers(
                         "/", "/index.html",
-                        "/login", "/statistics", "/scanner", "/admin",
+                    "/login", "/statistics", "/scanner", "/pricing", "/admin",
                         "/app.js", "/app.css",
                         "/assets/**", "/icons/**",
                         "/manifest.json", "/sw.js", "/workbox-*.js",

@@ -32,7 +32,12 @@
       "thumbnailUrl": null,
       "artist": "Compat Artist",
       "inkable": true,
-      "imageHash": null
+      "imageHash": null,
+      "marketPrice": 12.34,
+      "priceCurrency": "EUR",
+      "priceSource": "rapidapi-lorcana-prices",
+      "lastPriceAt": "2026-08-25T09:30:00",
+      "lastPriceStatus": "SUCCESS"
     }
   ],
   "collection": [

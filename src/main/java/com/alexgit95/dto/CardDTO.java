@@ -17,6 +17,11 @@ public class CardDTO {
     private String imageUrl;
     private String artist;
     private Boolean inkable;
+    private java.math.BigDecimal marketPrice;
+    private String priceCurrency;
+    private String priceSource;
+    private java.time.LocalDateTime lastPriceAt;
+    private String lastPriceStatus;
     private Long editionId;
     private String editionName;
     private String editionCode;

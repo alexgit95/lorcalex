@@ -42,7 +42,7 @@ public class StatisticsService {
     }
 
     public StatisticsDTO getStatistics() {
-        Set<Long> enabledSetIds = getEnabledSetIds();
+        Set<Long> enabledSetIds = resolveEnabledSetIds();
         List<Edition> editions = editionRepository.findAll().stream()
                 .filter(e -> enabledSetIds == null || enabledSetIds.contains(e.getId()))
                 .collect(Collectors.toList());
@@ -83,7 +83,7 @@ public class StatisticsService {
         return dto;
     }
 
-    private Set<Long> getEnabledSetIds() {
+    public Set<Long> resolveEnabledSetIds() {
         // null means no filter configured yet -> all sets enabled by default.
         AppSettings setting = settingsRepository.findBySettingKey(KEY_STATS_ENABLED_SETS).orElse(null);
         if (setting == null) return null;

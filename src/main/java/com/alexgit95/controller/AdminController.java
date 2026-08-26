@@ -9,11 +9,14 @@ import com.alexgit95.repository.CardRepository;
 import com.alexgit95.repository.EditionRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.LorcaJsonService;
+import com.alexgit95.service.PricingScheduleService;
+import com.alexgit95.service.PricingSyncService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -32,17 +35,23 @@ public class AdminController {
     private final UserCollectionRepository userCollectionRepository;
     private final CardRepository cardRepository;
     private final EditionRepository editionRepository;
+    private final PricingSyncService pricingSyncService;
+    private final PricingScheduleService pricingScheduleService;
 
     public AdminController(AppSettingsRepository settingsRepository,
                            LorcaJsonService lorcaJsonService,
                            UserCollectionRepository userCollectionRepository,
                            CardRepository cardRepository,
-                           EditionRepository editionRepository) {
+                           EditionRepository editionRepository,
+                           PricingSyncService pricingSyncService,
+                           PricingScheduleService pricingScheduleService) {
         this.settingsRepository = settingsRepository;
         this.lorcaJsonService = lorcaJsonService;
         this.userCollectionRepository = userCollectionRepository;
         this.cardRepository = cardRepository;
         this.editionRepository = editionRepository;
+        this.pricingSyncService = pricingSyncService;
+        this.pricingScheduleService = pricingScheduleService;
     }
 
     @GetMapping("/settings")
@@ -57,7 +66,9 @@ public class AdminController {
         AppSettings setting = settingsRepository.findBySettingKey(key)
                 .orElse(new AppSettings(key, null, null));
         setting.setSettingValue(body.get("value"));
-        return ResponseEntity.ok(settingsRepository.save(setting));
+        AppSettings saved = settingsRepository.save(setting);
+        pricingScheduleService.onSettingUpdated(key);
+        return ResponseEntity.ok(saved);
     }
 
     @GetMapping("/progress")
@@ -115,6 +126,23 @@ public class AdminController {
     @GetMapping("/lorcajson-url")
     public ResponseEntity<Map<String, Object>> getLorcaJsonUrl() {
         return ResponseEntity.ok(Map.of("url", lorcaJsonService.getLorcaJsonUrl()));
+    }
+
+    @GetMapping("/pricing/status")
+    public ResponseEntity<Map<String, Object>> getPricingStatus() {
+        Map<String, Object> status = new LinkedHashMap<>(pricingSyncService.getStatus());
+        status.putAll(pricingScheduleService.getScheduleStatus());
+        return ResponseEntity.ok(status);
+    }
+
+    @PostMapping("/pricing/run")
+    public ResponseEntity<Map<String, Object>> runPricingSync(
+            @RequestBody(required = false) Map<String, Object> body) {
+        Integer maxAttempts = null;
+        if (body != null && body.get("maxAttempts") instanceof Number n) {
+            maxAttempts = n.intValue();
+        }
+        return ResponseEntity.ok(pricingSyncService.runSync("manual", maxAttempts));
     }
 
     @PostMapping("/import/companion")
@@ -189,6 +217,11 @@ public class AdminController {
                     m.put("artist", c.getArtist());
                     m.put("inkable", c.getInkable());
                     m.put("imageHash", c.getImageHash());
+                    m.put("marketPrice", c.getMarketPrice());
+                    m.put("priceCurrency", c.getPriceCurrency());
+                    m.put("priceSource", c.getPriceSource());
+                    m.put("lastPriceAt", c.getLastPriceAt() != null ? c.getLastPriceAt().toString() : null);
+                    m.put("lastPriceStatus", c.getLastPriceStatus());
                     return m;
                 }).collect(Collectors.toList());
 
@@ -289,6 +322,11 @@ public class AdminController {
             card.setArtist((String) c.get("artist"));
             if (c.get("inkable")   != null) card.setInkable((Boolean) c.get("inkable"));
             if (c.get("imageHash") != null) card.setImageHash(((Number) c.get("imageHash")).longValue());
+            card.setMarketPrice(toBigDecimal(c.get("marketPrice")));
+            card.setPriceCurrency((String) c.get("priceCurrency"));
+            card.setPriceSource((String) c.get("priceSource"));
+            card.setLastPriceAt(toLocalDateTime(c.get("lastPriceAt")));
+            card.setLastPriceStatus((String) c.get("lastPriceStatus"));
             card = cardRepository.save(card);
             if (card.getExternalId() != null) cardByExternalId.put(card.getExternalId(), card);
             if (card.getCardNumber() != null && edCode != null)
@@ -351,5 +389,36 @@ public class AdminController {
                         + collectionRestored + " entrée(s) de collection, "
                         + settingsRaw.size() + " paramètre(s) restaurés."
         ));
+    }
+
+    private static BigDecimal toBigDecimal(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        if (value instanceof Number number) {
+            return BigDecimal.valueOf(number.doubleValue());
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return new BigDecimal(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static LocalDateTime toLocalDateTime(Object value) {
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return LocalDateTime.parse(text);
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 }

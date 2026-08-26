@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,6 +28,12 @@ class ImportExportCompatibilityUnitTest {
         assertThat(payload.keySet()).contains(
                 "backupDate", "version", "totalEditions", "totalCards", "totalCollection",
                 "editions", "cards", "collection", "settings");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cards = (List<Map<String, Object>>) payload.get("cards");
+        assertThat(cards).hasSize(1);
+        assertThat(cards.get(0)).containsKeys(
+            "marketPrice", "priceCurrency", "priceSource", "lastPriceAt", "lastPriceStatus");
     }
 
     @Test
