@@ -141,48 +141,6 @@ class PricingSyncIntegrationTest {
         assertThat(secondRun.get("reasonCode")).isEqualTo("PROVIDER_CONFIG_MISSING");
     }
 
-    @Test
-    @DisplayName("startup catch-up runs at most once per day")
-    void startupCatchup_runsOncePerDay() {
-        putSetting(PricingSettingsService.KEY_DAILY_BUDGET, "2");
-        putSetting(PricingSettingsService.KEY_DAILY_SAFETY_MARGIN, "0");
-        putSetting(PricingSettingsService.KEY_USED_ATTEMPTS, "0");
-        putSetting(PricingSettingsService.KEY_USAGE_DATE, LocalDate.now().toString());
-        putSetting(PricingSettingsService.KEY_LAST_SCHEDULED_RUN_DATE, LocalDate.now().minusDays(1).toString());
-
-        createCard("catchup", null);
-
-        pricingScheduleService.runStartupCatchupIfNeeded();
-        pricingScheduleService.runStartupCatchupIfNeeded();
-
-        Card catchup = cardRepository.findByExternalId("catchup").orElseThrow();
-        Map<String, Object> status = pricingSettingsService.getBudgetStatus();
-
-        assertThat(catchup.getLastPriceStatus()).isNull();
-        assertThat(status.get("usedAttempts")).isEqualTo(0);
-        assertThat(pricingSettingsService.getLastScheduledRunDate()).isEqualTo(LocalDate.now());
-    }
-
-    @Test
-    @DisplayName("startup catch-up is skipped when day already processed")
-    void startupCatchup_skippedWhenAlreadyProcessedToday() {
-        putSetting(PricingSettingsService.KEY_DAILY_BUDGET, "2");
-        putSetting(PricingSettingsService.KEY_DAILY_SAFETY_MARGIN, "0");
-        putSetting(PricingSettingsService.KEY_USED_ATTEMPTS, "0");
-        putSetting(PricingSettingsService.KEY_USAGE_DATE, LocalDate.now().toString());
-        putSetting(PricingSettingsService.KEY_LAST_SCHEDULED_RUN_DATE, LocalDate.now().toString());
-
-        createCard("already-processed", null);
-
-        pricingScheduleService.runStartupCatchupIfNeeded();
-
-        Card card = cardRepository.findByExternalId("already-processed").orElseThrow();
-        Map<String, Object> status = pricingSettingsService.getBudgetStatus();
-
-        assertThat(card.getLastPriceStatus()).isNull();
-        assertThat(status.get("usedAttempts")).isEqualTo(0);
-    }
-
     private void createCard(String externalId, LocalDateTime lastPriceAt) {
         Card card = new Card();
         card.setExternalId(externalId);

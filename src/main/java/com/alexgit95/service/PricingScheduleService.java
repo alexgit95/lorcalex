@@ -2,8 +2,6 @@ package com.alexgit95.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.scheduling.support.CronTrigger;
@@ -56,11 +54,6 @@ public class PricingScheduleService {
         scheduler.shutdown();
     }
 
-    @EventListener(ApplicationReadyEvent.class)
-    public void onApplicationReady() {
-        runStartupCatchupIfNeeded();
-    }
-
     public synchronized void onSettingUpdated(String key) {
         if (PricingSettingsService.KEY_SCHEDULE_CRON.equals(key)
                 || PricingSettingsService.KEY_SYNC_ENABLED.equals(key)) {
@@ -102,23 +95,6 @@ public class PricingScheduleService {
         LocalDate lastRunDate = pricingSettingsService.getLastScheduledRunDate();
         status.put("lastScheduledRunDate", lastRunDate != null ? lastRunDate.toString() : "");
         return status;
-    }
-
-    public void runStartupCatchupIfNeeded() {
-        if (!pricingSettingsService.isSyncEnabled()) {
-            return;
-        }
-
-        LocalDate today = LocalDate.now();
-        LocalDate lastRunDate = pricingSettingsService.getLastScheduledRunDate();
-        if (today.equals(lastRunDate)) {
-            return;
-        }
-
-        Map<String, Object> result = pricingSyncService.runSync("startup_catchup", null);
-        if (Boolean.TRUE.equals(result.get("started"))) {
-            pricingSettingsService.setLastScheduledRunDate(today);
-        }
     }
 
     private void runScheduledSync() {
