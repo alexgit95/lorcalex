@@ -7,13 +7,17 @@ TBD - created by archiving change add-card-pricing-sync-with-daily-attempt-quota
 The pricing scheduler SHALL prioritize cards without value before any card that already has a value timestamp.
 
 #### Scenario: Queue build with mixed cards
-- **WHEN** the scheduler builds the processing queue
-- **THEN** cards with null last price timestamp SHALL be ordered before cards with non-null last price timestamp
+- **WHEN** the scheduler evaluates candidate cards for update
+- **THEN** cards with missing pricing metadata SHALL be handled before cards that already have pricing metadata
 
 ### Requirement: Oldest-refresh next prioritization
-After missing-value cards are processed, the scheduler SHALL process cards by ascending last price timestamp (oldest first).
+After missing-value cards are prioritized, the scheduler SHALL prioritize cards with last price timestamp older than seven days before remaining recently priced cards.
 
-#### Scenario: Queue build for already valued cards
-- **WHEN** only cards with existing value timestamps remain
-- **THEN** the scheduler SHALL process the smallest timestamp first and continue in ascending order
+#### Scenario: Queue build with stale and recent priced cards
+- **WHEN** cards with existing pricing metadata are evaluated
+- **THEN** cards with `lastPriceAt` older than seven days SHALL be prioritized ahead of cards priced within the last seven days
+
+#### Scenario: Queue build with only recent priced cards
+- **WHEN** no missing-value cards and no stale-over-seven-days cards remain
+- **THEN** the scheduler SHALL process remaining cards as the final priority tier
 

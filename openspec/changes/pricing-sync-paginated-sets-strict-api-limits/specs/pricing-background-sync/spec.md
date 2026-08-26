@@ -11,6 +11,14 @@ The system SHALL execute a recurring background pricing synchronization run that
 - **WHEN** the daily pricing trigger fires and remaining operational budget is zero
 - **THEN** no provider request SHALL be dispatched and the run SHALL terminate immediately
 
+### Requirement: Startup does not auto-trigger pricing synchronization
+The system SHALL NOT launch pricing synchronization automatically at application startup.
+
+#### Scenario: Application startup completes
+- **WHEN** the application becomes ready
+- **THEN** no startup catch-up pricing run SHALL be triggered automatically
+- **AND** pricing synchronization SHALL only run from scheduled triggers or explicit manual admin triggers
+
 ### Requirement: Manual trigger uses same guards
 Any manual admin-triggered pricing run SHALL use the same daily and per-minute call guards, pagination semantics, and prioritization constraints as scheduled runs.
 

@@ -74,7 +74,7 @@ Product prioritization policy for refresh is explicitly changed to:
 
 ## Risks / Trade-offs
 
-- [Provider payload mismatch with local card identity] -> Mitigation: deterministic matching cascade (code+number, then controlled fallbacks) and unresolved telemetry.
+- [Provider payload mismatch with local card identity] -> Mitigation: deterministic matching cascade (setNumber+cardNumber first, episode set-number fallback, externalId last-resort) and unresolved telemetry.
 - [Long catch-up windows on large catalogs] -> Mitigation: durable cursor + daily continuation; no reset of progress on restart.
 - [Retry storms can consume budget quickly] -> Mitigation: bounded retries, retry counted as call, clear stop reasons when budget is near exhaustion.
 - [Minute limiter contention if parallelism is introduced later] -> Mitigation: enforce one global limiter for all pricing outbound calls.

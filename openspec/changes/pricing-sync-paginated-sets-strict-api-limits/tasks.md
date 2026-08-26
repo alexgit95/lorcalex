@@ -2,7 +2,7 @@
 
 - [x] 1.1 Add provider client operations for paginated episode discovery (`/episodes?page=n`) with paging metadata extraction
 - [x] 1.2 Add provider client operations for paginated episode cards (`/episodes/{id}/cards?page=n&per_page=100`)
-- [x] 1.3 Implement deterministic provider-card to local-card mapping using set code + card number, with unresolved telemetry fallback
+- [x] 1.3 Implement deterministic provider-card to local-card mapping using set number + card number (episode set fallback), with unresolved telemetry fallback
 
 ## 2. Strict Call Governance
 
