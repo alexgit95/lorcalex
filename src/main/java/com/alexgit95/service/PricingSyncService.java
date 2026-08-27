@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class PricingSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(PricingSyncService.class);
+    private static final java.math.BigDecimal HIGH_PRICE_LOG_THRESHOLD = java.math.BigDecimal.valueOf(5);
 
     private final CardRepository cardRepository;
     private final PricingSettingsService pricingSettingsService;
@@ -499,7 +500,7 @@ public class PricingSyncService {
                 }
                 continue;
             }
-            mappedRows.add(new MappedRow(maybeCard.get(), price.value));
+            mappedRows.add(new MappedRow(maybeCard.get(), price.value, row));
         }
 
         int updated = 0;
@@ -517,6 +518,10 @@ public class PricingSyncService {
             cardRepository.save(card);
             statusCounts.merge("SUCCESS", 1, Integer::sum);
             updated++;
+            if (row.price.compareTo(HIGH_PRICE_LOG_THRESHOLD) > 0) {
+                log.info("High market price detected (cardId={}, externalId={}, price={}, providerRow={})",
+                        card.getId(), card.getExternalId(), row.price, row.rawRow);
+            }
         }
         return new MappingBatchResult(updated, unresolved, mappingSamples, priceSamples);
     }
@@ -884,7 +889,7 @@ public class PricingSyncService {
                                       List<String> priceSamples) {
     }
 
-    private record MappedRow(Card card, java.math.BigDecimal price) {
+    private record MappedRow(Card card, java.math.BigDecimal price, Map<String, Object> rawRow) {
     }
 
     private record BigDecimalPrice(java.math.BigDecimal value) {
