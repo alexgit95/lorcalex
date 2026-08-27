@@ -19,6 +19,10 @@ et ce projet respecte la Versioning Sémantique.
 
 - Les 20 dernières cartes du catalogue valorisées sont maintenant affichées en bas de l'onglet Prix.
 
+### Fixed
+
+- La barre de navigation du bas ne débordait plus l'écran sur les mobiles étroits (~360-390px) : l'onglet Admin, auparavant hors champ, est de nouveau visible et accessible.
+
 ---
 
 ## [2.8.0]

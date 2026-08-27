@@ -210,11 +210,27 @@ body {
   text-decoration: none;
   transition: color 0.15s;
   flex: 1;
+  min-width: 0;
 }
 
 .nav-item svg {
   width: 24px;
   height: 24px;
+}
+
+@media (max-width: 400px) {
+  .nav-item {
+    padding: 8px 4px;
+  }
+
+  .nav-item svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .nav-item span {
+    font-size: 0.58rem;
+  }
 }
 
 /* Toast notifications */
