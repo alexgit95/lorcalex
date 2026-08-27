@@ -125,6 +125,42 @@ class PricingInsightsIntegrationTest {
 
     @Test
     @WithMockUser
+    @DisplayName("insights computes edition completion cost split by rarity tier for missing cards")
+    void insights_computesCompletionCostByRarityTier() throws Exception {
+        Edition edition = saveEdition("TFC", "Premier Chapitre", 1);
+
+        Card missingCommon = saveCard(edition, "missing-common", new BigDecimal("1.00"), "EUR", LocalDateTime.now());
+        missingCommon.setRarity("Commune");
+        cardRepository.save(missingCommon);
+        Card missingLegendary = saveCard(edition, "missing-legendary", new BigDecimal("5.00"), "EUR", LocalDateTime.now());
+        missingLegendary.setRarity("Légendaire");
+        cardRepository.save(missingLegendary);
+        Card missingEnchanted = saveCard(edition, "missing-enchanted", new BigDecimal("20.00"), "EUR", LocalDateTime.now());
+        missingEnchanted.setRarity("Enchanté");
+        cardRepository.save(missingEnchanted);
+        Card missingUnknownPrice = saveCard(edition, "missing-unknown", null, "EUR", LocalDateTime.now());
+        Card ownedRare = saveCard(edition, "owned-rare", new BigDecimal("3.00"), "EUR", LocalDateTime.now());
+        ownedRare.setRarity("Rare");
+        cardRepository.save(ownedRare);
+        saveCollection(ownedRare, 1, 0);
+
+        String json = mockMvc.perform(get("/api/pricing/insights"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> payload = objectMapper.readValue(json, new TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> valuations = (List<Map<String, Object>>) payload.get("editionValuations");
+
+        assertThat(valuations).hasSize(1);
+        Map<String, Object> editionValuation = valuations.get(0);
+        assertThat(editionValuation.get("completionCostBaseEur")).isEqualTo(6.0);
+        assertThat(editionValuation.get("completionCostPremiumEur")).isEqualTo(20.0);
+        assertThat(editionValuation.get("missingCardsUnknownPrice")).isEqualTo(1);
+    }
+
+    @Test
+    @WithMockUser
     @DisplayName("removing a price preserves normal and foil collection quantities")
     void removePrice_preservesCollectionQuantities() throws Exception {
         Edition edition = saveEdition("TFC", "Premier Chapitre", 1);

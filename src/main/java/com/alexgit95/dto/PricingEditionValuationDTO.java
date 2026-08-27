@@ -11,4 +11,7 @@ public class PricingEditionValuationDTO {
     private String editionCode;
     private Integer editionSetNumber;
     private BigDecimal totalValueEur;
+    private BigDecimal completionCostBaseEur;
+    private BigDecimal completionCostPremiumEur;
+    private int missingCardsUnknownPrice;
 }

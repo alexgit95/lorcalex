@@ -367,6 +367,7 @@ Un onglet `Prix` expose une vue opérationnelle en lecture seule:
 
 - Le top des cartes possédées valorisées, trié par prix unitaire EUR décroissant. Le sélecteur permet d'afficher les 20, 50 ou 100 premières cartes ; les quantités normale et foil sont affichées sans influencer le rang.
 - La valorisation par édition suivie (même périmètre que `stats_enabled_sets`).
+- Pour chaque édition suivie, le coût des cartes manquantes (non possédées, ni normal ni foil) de rareté `Commune`, `Inhabituelle`, `Rare`, `Très Rare` ou `Légendaire`, affiché sous le libellé **Coût des cartes manquantes (Courantes et Légendaire)**. Les cartes manquantes sans prix connu sont exclues du total mais comptabilisées dans un indicateur global par édition ("prix inconnu pour X cartes, coût minoré").
 - Le total global de valorisation collection en EUR.
 - Un graphique historique de la valeur totale de la collection calculé à chaque synchronisation pricing.
 - Un tableau par édition affichant la valeur courante et les écarts sur 7 jours et 30 jours.

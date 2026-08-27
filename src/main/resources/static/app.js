@@ -612,6 +612,13 @@ function loadPricingData() {
           </div>
           <span style="color:var(--accent);font-weight:700">${formatEuro(e.totalValueEur || 0)}</span>
         </div>
+        <div style="margin-top:8px;padding:6px 8px;border-radius:8px;background:var(--bg-card2);font-size:.78rem;">
+          <div style="color:var(--text-muted)">Coût des cartes manquantes (Courantes et Légendaire)</div>
+          <div style="margin-top:4px;font-weight:700">${formatEuro(e.completionCostBaseEur || 0)}</div>
+        </div>
+        ${e.missingCardsUnknownPrice > 0
+          ? `<div style="margin-top:6px;font-size:.72rem;color:var(--warning)">⚠ prix inconnu pour ${e.missingCardsUnknownPrice} carte${e.missingCardsUnknownPrice > 1 ? 's' : ''}, coût minoré</div>`
+          : ''}
       </div>`).join('');
 
     const content = document.getElementById('pricingTabContent');

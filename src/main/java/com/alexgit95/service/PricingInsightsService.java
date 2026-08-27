@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class PricingInsightsService {
@@ -31,6 +32,8 @@ public class PricingInsightsService {
     private static final int LATEST_PRICED_FETCH_SIZE = 200;
     private static final int LATEST_PRICED_LIMIT = 20;
     private static final int OWNED_CARD_PRICE_RANKING_LIMIT = 100;
+    private static final Set<String> BASE_COMPLETION_RARITIES = Set.of(
+            "Commune", "Inhabituelle", "Rare", "Très Rare", "Légendaire");
 
     private final CardRepository cardRepository;
     private final UserCollectionRepository collectionRepository;
@@ -111,6 +114,7 @@ public class PricingInsightsService {
 
         List<PricingEditionValuationDTO> valuations = byEdition.values().stream()
                 .peek(v -> v.setTotalValueEur(v.getTotalValueEur().setScale(2, RoundingMode.HALF_UP)))
+                .peek(this::applyCompletionCost)
                 .sorted(Comparator
                         .comparing((PricingEditionValuationDTO v) -> v.getEditionSetNumber() != null ? v.getEditionSetNumber() : Integer.MAX_VALUE)
                         .thenComparing(v -> v.getEditionName() != null ? v.getEditionName() : ""))
@@ -155,6 +159,36 @@ public class PricingInsightsService {
         cardRepository.save(card);
 
         return cardService.toDTO(card, collection);
+    }
+
+    private void applyCompletionCost(PricingEditionValuationDTO dto) {
+        Set<Long> ownedCardIds = collectionRepository.findByEditionId(dto.getEditionId()).stream()
+                .filter(uc -> safeInt(uc.getQuantity()) + safeInt(uc.getFoilQuantity()) > 0)
+                .map(uc -> uc.getCard().getId())
+                .collect(Collectors.toSet());
+
+        BigDecimal baseCost = BigDecimal.ZERO;
+        BigDecimal premiumCost = BigDecimal.ZERO;
+        int unknownPriceCount = 0;
+
+        for (Card card : cardRepository.findByEditionIdOrderByCardNumberAsc(dto.getEditionId())) {
+            if (ownedCardIds.contains(card.getId())) {
+                continue;
+            }
+            if (!isEurCard(card)) {
+                unknownPriceCount++;
+                continue;
+            }
+            if (card.getRarity() != null && BASE_COMPLETION_RARITIES.contains(card.getRarity())) {
+                baseCost = baseCost.add(card.getMarketPrice());
+            } else {
+                premiumCost = premiumCost.add(card.getMarketPrice());
+            }
+        }
+
+        dto.setCompletionCostBaseEur(baseCost.setScale(2, RoundingMode.HALF_UP));
+        dto.setCompletionCostPremiumEur(premiumCost.setScale(2, RoundingMode.HALF_UP));
+        dto.setMissingCardsUnknownPrice(unknownPriceCount);
     }
 
     private Map<Long, PricingEditionValuationDTO> initTrackedEditions(Set<Long> enabledSetIds) {
