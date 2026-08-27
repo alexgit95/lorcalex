@@ -197,7 +197,8 @@ class PricingSyncServiceTest {
             when(pricingProviderClient.fetchEpisodeCardsPage(206L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
                     List.of(Map.of(
                             "card_number", 22,
-                            "price", "1.25"
+                            "price", "1.25",
+                            "prices", Map.of("cardmarket", Map.of("currency", "EUR", "lowest_near_mint", "1.25"))
                     )),
                     new PricingProviderClient.Paging(1, 1, 100)
             ));
@@ -227,6 +228,7 @@ class PricingSyncServiceTest {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("card_number", 143);
             row.put("price", "0.04");
+            row.put("prices", Map.of("cardmarket", Map.of("currency", "EUR", "lowest_near_mint", "0.04")));
 
             when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
                 List.of(row),
@@ -259,6 +261,7 @@ class PricingSyncServiceTest {
             row.put("set_code", "TFC");
             row.put("card_number", 124);
             row.put("price", "1.23");
+            row.put("prices", Map.of("cardmarket", Map.of("currency", "EUR", "lowest_near_mint", "1.23")));
 
             when(pricingProviderClient.fetchEpisodeCardsPage(402L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
                 List.of(row),
@@ -299,12 +302,12 @@ class PricingSyncServiceTest {
             assertThat(report.get("successCount")).isEqualTo(1);
             verify(cardRepository).findByCardNumberAndEditionId(143, 11L);
             verify(cardRepository).save(localCard);
-            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.02");
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.06");
             }
 
             @Test
-            @DisplayName("runSync prefers cardmarket lowest_near_mint_FR_EU_only over other price fields")
-            void runSync_prefersCardmarketLowestNearMintFrEuOnly() {
+            @DisplayName("runSync prefers cardmarket 7d_average over other price fields")
+            void runSync_prefersCardmarket7dAverage() {
             Card localCard = card("ext-fr-eu-price", null);
 
             mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
@@ -336,7 +339,114 @@ class PricingSyncServiceTest {
             Map<String, Object> report = pricingSyncService.runSync("manual", null);
 
             assertThat(report.get("successCount")).isEqualTo(1);
-            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.09");
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("888.88");
+            }
+
+            @Test
+            @DisplayName("runSync prefers cardmarket 30d_average when 7d_average is absent")
+            void runSync_prefersCardmarket30dAverageWhen7dAverageMissing() {
+            Card localCard = card("ext-30d-average", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 171);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "30d_average", 4.44,
+                    "lowest_near_mint_FR", 1.11,
+                    "lowest_near_mint", 0.22
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(171, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("4.44");
+            }
+
+            @Test
+            @DisplayName("runSync prefers cardmarket lowest_near_mint_FR when averages are absent")
+            void runSync_prefersCardmarketLowestNearMintFrWhenAveragesMissing() {
+            Card localCard = card("ext-near-mint-fr", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 172);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint_FR", 1.11,
+                    "lowest_near_mint_FR_EU_only", 2.22,
+                    "lowest_near_mint", 3.33
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(172, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("1.11");
+            }
+
+            @Test
+            @DisplayName("runSync skips cardmarket candidates on currency mismatch and uses tcg_player.market_price")
+            void runSync_skipsCardmarketOnCurrencyMismatchAndUsesTcgPlayer() {
+            Card localCard = card("ext-currency-mismatch-fallthrough", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 173);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "USD",
+                    "7d_average", 9.99
+                ),
+                "tcg_player", Map.of("currency", "EUR", "market_price", 6.66)
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(173, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("6.66");
             }
 
             @Test
@@ -357,8 +467,7 @@ class PricingSyncServiceTest {
             providerRow.put("prices", Map.of(
                 "cardmarket", Map.of(
                     "currency", "EUR",
-                    "lowest_near_mint", 0.15,
-                    "30d_average", 999.99
+                    "lowest_near_mint", 0.15
                 )
             ));
 
@@ -477,7 +586,7 @@ class PricingSyncServiceTest {
             }
 
         @Test
-        @DisplayName("runSync parses nested price with comma decimal")
+        @DisplayName("runSync parses tcg_player market_price with comma decimal")
         void runSync_parsesNestedCommaPrice() {
         Card mapped = card("mapped", null);
 
@@ -493,7 +602,7 @@ class PricingSyncServiceTest {
         providerRow.put("set_code", "TFC");
         providerRow.put("card_number", 124);
         providerRow.put("prices", Map.of(
-            "market", Map.of("eur", "1,23 €")
+            "tcg_player", Map.of("currency", "EUR", "market_price", "1,23 €")
         ));
 
         when(pricingProviderClient.fetchEpisodeCardsPage(213L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
@@ -514,6 +623,9 @@ class PricingSyncServiceTest {
         row.put("set_code", setCode);
         row.put("card_number", cardNumber);
         row.put("marketPrice", marketPrice);
+        row.put("prices", Map.of(
+            "cardmarket", Map.of("currency", "EUR", "lowest_near_mint", marketPrice)
+        ));
         return row;
     }
 

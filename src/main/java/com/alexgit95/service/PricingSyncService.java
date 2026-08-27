@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Comparator;
@@ -24,6 +23,9 @@ public class PricingSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(PricingSyncService.class);
     private static final java.math.BigDecimal HIGH_PRICE_LOG_THRESHOLD = java.math.BigDecimal.valueOf(5);
+    private static final List<String> CARDMARKET_CANDIDATE_KEYS = List.of(
+            "7d_average", "30d_average", "lowest_near_mint_FR", "lowest_near_mint_FR_EU_only", "lowest_near_mint"
+    );
 
     private final CardRepository cardRepository;
     private final PricingSettingsService pricingSettingsService;
@@ -605,39 +607,44 @@ public class PricingSyncService {
 
     private BigDecimalPrice extractPriceFromRow(Map<String, Object> payload) {
         java.math.BigDecimal parsed = extractCardmarketPreferredPrice(payload);
-        if (parsed == null) {
-            parsed = extractPriceNode(payload, false);
-        }
         if (parsed != null) {
             parsed = parsed.setScale(2, java.math.RoundingMode.HALF_UP);
         }
         return new BigDecimalPrice(parsed);
     }
 
-    /** French near-mint cardmarket price is authoritative; a currency-checked generic near-mint price is the next fallback. */
+    /**
+     * Ordered price source priority: cardmarket 7d/30d averages, then FR, FR EU-only, and generic
+     * near-mint, then tcg_player market price as last resort. Each container's currency is checked
+     * once (all cardmarket-sourced candidates share cardmarket.currency); no further fallback is
+     * attempted if none of the ordered candidates are usable.
+     */
     private java.math.BigDecimal extractCardmarketPreferredPrice(Map<String, Object> payload) {
         Object pricesNode = payload.get("prices");
         if (!(pricesNode instanceof Map<?, ?> pricesMap)) {
             return null;
         }
+
         Object cardmarketNode = pricesMap.get("cardmarket");
-        if (!(cardmarketNode instanceof Map<?, ?> cardmarketMap)) {
-            return null;
+        if (cardmarketNode instanceof Map<?, ?> cardmarketMap && isAcceptableCurrency(cardmarketMap)) {
+            for (String key : CARDMARKET_CANDIDATE_KEYS) {
+                java.math.BigDecimal value = extractPriceNode(cardmarketMap.get(key));
+                if (value != null) {
+                    return value;
+                }
+            }
         }
 
-        java.math.BigDecimal frEuOnly = extractPriceNode(cardmarketMap.get("lowest_near_mint_FR_EU_only"), true);
-        if (frEuOnly != null) {
-            return frEuOnly;
+        Object tcgPlayerNode = pricesMap.get("tcg_player");
+        if (tcgPlayerNode instanceof Map<?, ?> tcgPlayerMap && isAcceptableCurrency(tcgPlayerMap)) {
+            return extractPriceNode(tcgPlayerMap.get("market_price"));
         }
 
-        if (!isAcceptableCardmarketCurrency(cardmarketMap)) {
-            return null;
-        }
-        return extractPriceNode(cardmarketMap.get("lowest_near_mint"), true);
+        return null;
     }
 
-    private boolean isAcceptableCardmarketCurrency(Map<?, ?> cardmarketMap) {
-        Object currencyNode = cardmarketMap.get("currency");
+    private boolean isAcceptableCurrency(Map<?, ?> priceContainerMap) {
+        Object currencyNode = priceContainerMap.get("currency");
         if (currencyNode == null) {
             return true;
         }
@@ -645,82 +652,14 @@ public class PricingSyncService {
         return expected == null || expected.isBlank() || String.valueOf(currencyNode).trim().equalsIgnoreCase(expected);
     }
 
-
-    private java.math.BigDecimal extractPriceNode(Object node, boolean fromLikelyPriceContext) {
-        if (node == null) {
-            return null;
-        }
-
+    private java.math.BigDecimal extractPriceNode(Object node) {
         if (node instanceof Number n) {
-            return fromLikelyPriceContext ? java.math.BigDecimal.valueOf(n.doubleValue()) : null;
+            return java.math.BigDecimal.valueOf(n.doubleValue());
         }
-
         if (node instanceof String s) {
-            return fromLikelyPriceContext ? parseDecimalString(s) : null;
+            return parseDecimalString(s);
         }
-
-        if (node instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                if (!isLikelyPriceKey(key)) {
-                    continue;
-                }
-                java.math.BigDecimal direct = extractPriceNode(entry.getValue(), true);
-                if (direct != null) {
-                    return direct;
-                }
-            }
-
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                if (!isLikelyPriceContainerKey(key)) {
-                    continue;
-                }
-                java.math.BigDecimal nested = extractPriceNode(entry.getValue(), true);
-                if (nested != null) {
-                    return nested;
-                }
-            }
-        }
-
-        if (node instanceof List<?> list) {
-            for (Object item : list) {
-                java.math.BigDecimal nested = extractPriceNode(item, fromLikelyPriceContext);
-                if (nested != null) {
-                    return nested;
-                }
-            }
-        }
-
         return null;
-    }
-
-    private static boolean isLikelyPriceKey(String key) {
-        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT);
-        return normalized.contains("marketprice")
-                || normalized.contains("market_price")
-                || normalized.equals("price")
-                || normalized.contains("price_")
-                || normalized.contains("_price")
-                || normalized.equals("value")
-                || normalized.equals("amount")
-                || normalized.equals("eur")
-                || normalized.equals("usd")
-                || normalized.equals("avg")
-                || normalized.equals("average")
-                || normalized.equals("median")
-                || normalized.equals("low")
-                || normalized.equals("high");
-    }
-
-    private static boolean isLikelyPriceContainerKey(String key) {
-        String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT).replace("_", "");
-        return normalized.contains("pricing")
-                || normalized.contains("prices")
-                || normalized.contains("cardmarket")
-                || normalized.equals("market")
-                || normalized.contains("tcgplayer")
-                || normalized.contains("shop");
     }
 
     private static java.math.BigDecimal parseDecimalString(String raw) {

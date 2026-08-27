@@ -1,38 +1,4 @@
-# pricing-provider-integration Specification
-
-## Purpose
-TBD - created by archiving change add-card-pricing-sync-with-daily-attempt-quota. Update Purpose after archive.
-## Requirements
-### Requirement: Provider-backed pricing lookup
-The system SHALL fetch card prices from the configured external Lorcana pricing provider using paginated set discovery and paginated set-card retrieval with deterministic local card mapping.
-
-#### Scenario: Provider set pages are traversed
-- **WHEN** a pricing run starts with remaining outbound call budget
-- **THEN** the system SHALL retrieve provider episodes through all available pages within active budget constraints
-
-#### Scenario: Provider set-card page mapped to local cards
-- **WHEN** provider returns a paginated card page for a set
-- **THEN** the system SHALL deterministically map returned cards to local cards using `cardNumber` and normalized episode-aware set identity
-- **AND** if `episode.code` is present with a numeric prefix (example `11WSP`), the system SHALL extract the prefix and use it as the primary numeric set identity candidate
-- **AND** if row-level or episode-level numeric set fields are available, the system SHALL use them as deterministic fallback set identity candidates
-- **AND** if numeric set identity matching fails, the system SHALL attempt deterministic edition-code plus `cardNumber` matching
-- **AND** the system SHALL update pricing metadata for mapped cards
-
-#### Scenario: Provider card cannot be deterministically mapped
-- **WHEN** provider response cannot be mapped to a local card deterministically
-- **THEN** the item SHALL be marked unresolved and included in error telemetry
-
-#### Scenario: Name mismatch does not affect deterministic mapping
-- **WHEN** provider card name differs from local card name formatting
-- **THEN** mapping SHALL still rely on deterministic identifiers and SHALL NOT require name equality
-
-### Requirement: Provider errors are telemetry, not budget control
-Provider throttling or error responses SHALL NOT relax local call-limit enforcement semantics.
-
-#### Scenario: Provider returns 429
-- **WHEN** provider returns HTTP 429
-- **THEN** the outbound request SHALL still consume one daily call unit
-- **AND** the response SHALL be recorded as provider error telemetry
+## MODIFIED Requirements
 
 ### Requirement: Cardmarket price source priority order
 The system SHALL determine a card's market price from a provider row by evaluating an ordered list of price source candidates and using the first candidate that is present and whose associated currency matches the configured provider currency.
@@ -76,3 +42,9 @@ For candidates 1-5, the associated currency is `prices.cardmarket.currency`. For
 - **WHEN** the first usable candidate in priority order has a value of zero
 - **THEN** the system SHALL use zero as the card's market price
 - **AND** SHALL NOT treat it as a missing value or continue to the next candidate
+
+## REMOVED Requirements
+
+### Requirement: Generic price field discovery recognizes marketplace container keys regardless of separators
+**Reason**: The generic key-scan fallback (matching loosely-named keys such as `price`, `value`, `avg`, `average`, `low`, `high` anywhere in the payload, including within container keys like `tcg_player`/`cardmarket`) has produced inaccurate prices in practice and is replaced by the strict ordered candidate list in the "Cardmarket price source priority order" requirement, which has no further fallback.
+**Migration**: Provider rows that do not expose any of the 6 named ordered candidates (in the configured provider currency) are now treated as unresolved (`UNRESOLVED_PRICE`) instead of having a price guessed from an arbitrary matching key.

@@ -352,6 +352,19 @@ Le moteur de synchronisation parcourt désormais des endpoints paginés provider
 
 Le mapping provider -> carte locale est déterministe : code d'édition + numéro de carte en priorité, puis fallback contrôlé sur `externalId`.
 
+### Extraction du prix provider
+
+Pour chaque ligne provider, le prix est recherché dans cet ordre, uniquement si le conteneur indique `currency: EUR` (comparaison insensible à la casse) :
+
+1. `prices.cardmarket.7d_average`
+2. `prices.cardmarket.30d_average`
+3. `prices.cardmarket.lowest_near_mint_FR`
+4. `prices.cardmarket.lowest_near_mint_FR_EU_only`
+5. `prices.cardmarket.lowest_near_mint`
+6. `prices.tcg_player.market_price`
+
+Les valeurs nulles sont ignorées, mais `0` est un prix valide. Si aucun de ces six champs n'est exploitable, le prix reste non résolu (`UNRESOLVED_PRICE`) : aucun fallback générique sur d'autres champs du payload n'est appliqué.
+
 ### Exécution
 
 - Tâche planifiée quotidienne basée sur `pricing_schedule_cron` (modifiable en administration, sans redémarrage).

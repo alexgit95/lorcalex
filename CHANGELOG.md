@@ -19,6 +19,7 @@ et ce projet respecte la Versioning Sémantique.
 ### Changed
 
 - Les 20 dernières cartes du catalogue valorisées sont maintenant affichées en bas de l'onglet Prix.
+- **Breaking :** l'extraction des prix provider suit désormais l'ordre `prices.cardmarket.7d_average`, `30d_average`, `lowest_near_mint_FR`, `lowest_near_mint_FR_EU_only`, `lowest_near_mint`, puis `prices.tcg_player.market_price`, avec devise `EUR` obligatoire. Le fallback générique sur les champs de prix non standard est supprimé ; une carte sans valeur exploitable reste non résolue.
 
 ### Fixed
 
