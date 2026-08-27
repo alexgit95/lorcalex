@@ -8,6 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class LorcalexApplication {
     public static void main(String[] args) {
+        
         SpringApplication.run(LorcalexApplication.class, args);
     }
 }

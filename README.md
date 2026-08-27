@@ -5,6 +5,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 
 ---
 
+
 ## Table des matières
 
 - [Fonctionnalités](#fonctionnalités)
