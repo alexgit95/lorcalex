@@ -217,6 +217,28 @@ body {
   height: 24px;
 }
 
+/* Toast notifications */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--nav-height) + 16px);
+  transform: translateX(-50%);
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--success);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 400;
+  max-width: 90vw;
+  font-size: .88rem;
+}
+
+.toast-error {
+  border-left-color: var(--danger);
+}
+
 .nav-item span {
   font-size: 0.65rem;
   font-weight: 600;

@@ -9,10 +9,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/pricing")
@@ -45,5 +48,23 @@ public class PricingController {
     @GetMapping("/edition-deltas")
     public ResponseEntity<List<EditionDeltaDTO>> getEditionDeltas() {
         return ResponseEntity.ok(collectionValueTrendService.getEditionDeltas());
+    }
+
+    @PostMapping("/recompute-value")
+    public ResponseEntity<Map<String, Object>> recomputeValue() {
+        try {
+            collectionValueTrendService.persistSnapshotFromCurrentCollection();
+            return ResponseEntity.ok(Map.of("success", true));
+        } catch (Exception e) {
+            Throwable rootCause = e;
+            while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+                rootCause = rootCause.getCause();
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("success", false);
+            body.put("message", e.getMessage());
+            body.put("rootCause", rootCause.getMessage());
+            return ResponseEntity.internalServerError().body(body);
+        }
     }
 }

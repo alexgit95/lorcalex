@@ -371,6 +371,7 @@ Un onglet `Prix` expose une vue opérationnelle en lecture seule:
 - Un graphique historique de la valeur totale de la collection calculé à chaque synchronisation pricing.
 - Un tableau par édition affichant la valeur courante et les écarts sur 7 jours et 30 jours.
 - Les 20 dernières cartes du catalogue ayant reçu un prix (`lastPriceAt` décroissant), en bas de l'onglet.
+- Un bouton **Recalculer** à côté de la valeur totale permet de forcer, à tout moment, un nouveau snapshot de la valeur totale et par édition à partir des prix déjà stockés en base (`POST /api/pricing/recompute-value`). Aucun appel au fournisseur de prix n'est effectué et aucun budget de synchronisation n'est consommé. Le bouton se désactive pendant le calcul, affiche une confirmation (toast) en cas de succès, et affiche le message d'erreur ainsi que la cause racine en cas d'échec.
 
 Depuis la fiche d'une carte présente dans le top, l'action confirmée **Supprimer le prix** efface uniquement ses données de cotation. Les quantités normale et foil restent inchangées ; la carte est exclue de la valorisation et du top jusqu'à la prochaine synchronisation EUR.
 
@@ -386,10 +387,11 @@ Contraintes monétaires:
 
 ### Historique de valeur et tendances
 
-Après chaque synchronisation pricing réussie, le backend enregistre un snapshot global puis un snapshot par édition.
+Après chaque synchronisation pricing réussie, le backend enregistre un snapshot global puis un snapshot par édition. Un snapshot peut aussi être déclenché manuellement depuis l'onglet Prix (voir ci-dessus), sans passer par une synchronisation pricing.
 
 - `GET /api/pricing/trend` renvoie les points de valeur totale de la collection triés chronologiquement.
 - `GET /api/pricing/edition-deltas` renvoie pour chaque édition la valeur courante, la valeur de référence à 7 jours et à 30 jours, ainsi que les variations en pourcentage.
+- `POST /api/pricing/recompute-value` recalcule et persiste un nouveau snapshot (global + par édition) à partir des prix actuellement stockés, sans appel au fournisseur de prix.
 - Les deltas sont calculés à partir des snapshots historiques les plus récents à ou avant les seuils temporels.
 
 Le modèle de données historique est donc aligné sur la chronologie des synchronisations, ce qui permet de tracer la valeur globale sur le temps et de comparer l'évolution par set.

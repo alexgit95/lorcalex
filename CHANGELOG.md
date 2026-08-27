@@ -13,6 +13,7 @@ et ce projet respecte la Versioning Sémantique.
 
 - L'onglet Prix affiche un top des cartes possédées valorisées, trié par prix unitaire EUR décroissant, avec un sélecteur 20 / 50 / 100 et les quantités normal/foil à titre informatif.
 - La fiche d'une carte du top permet de supprimer son prix après confirmation, sans modifier les quantités possédées.
+- Un bouton **Recalculer** sur l'onglet Prix permet de relancer manuellement le calcul de la valeur totale et par édition à partir des prix déjà en base, sans appel au fournisseur de prix (`POST /api/pricing/recompute-value`).
 
 ### Changed
 

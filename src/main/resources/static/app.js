@@ -25,8 +25,11 @@ async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     let msg = `HTTP ${response.status}`;
-    try { const j = await response.json(); msg = j.message || msg; } catch { /* ignore */ }
-    throw new Error(msg);
+    let rootCause;
+    try { const j = await response.json(); msg = j.message || msg; rootCause = j.rootCause; } catch { /* ignore */ }
+    const error = new Error(msg);
+    error.rootCause = rootCause;
+    throw error;
   }
 
   const ct = response.headers.get('content-type') || '';
@@ -72,6 +75,7 @@ const api = {
   removeCardPrice: (cardId) => apiFetch(`/pricing/cards/${cardId}/price`, { method: 'DELETE' }),
   getTrend: () => apiFetch('/pricing/trend'),
   getEditionDeltas: () => apiFetch('/pricing/edition-deltas'),
+  recomputeValue: () => apiFetch('/pricing/recompute-value', { method: 'POST' }),
 
   getSettings: () => apiFetch('/admin/settings'),
 
@@ -232,6 +236,14 @@ function esc(str) {
 
 function loadingHTML(label = 'Chargement...') {
   return `<div class="loading-center"><div class="spinner"></div><span>${label}</span></div>`;
+}
+
+function showToast(message, { error = false, duration = 3500 } = {}) {
+  const toast = document.createElement('div');
+  toast.className = `toast${error ? ' toast-error' : ''}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), duration);
 }
 
 function formatDate(isoStr) {
@@ -584,7 +596,11 @@ function renderPricingPage() {
     </div>
     <div id="modalArea"></div>`;
 
-  api.getPricingInsights().then(data => {
+  loadPricingData();
+}
+
+function loadPricingData() {
+  return api.getPricingInsights().then(data => {
     pricingCardsState = data.latestPricedCards || [];
     ownedPricingCardsState = data.ownedCardPriceRanking || [];
     const editionRows = (data.editionValuations || []).map(e => `
@@ -603,7 +619,11 @@ function renderPricingPage() {
 
     content.innerHTML = `
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value">${formatEuro(data.totalCollectionValueEur || 0)}</div><div class="stat-label">Valeur totale (EUR)</div></div>
+        <div class="stat-card">
+          <div class="stat-value">${formatEuro(data.totalCollectionValueEur || 0)}</div>
+          <div class="stat-label">Valeur totale (EUR)</div>
+          <button class="btn btn-ghost" id="recomputeValueBtn" style="margin-top:8px;padding:4px 10px;font-size:.78rem">🔄 Recalculer</button>
+        </div>
         <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${data.excludedNoPrice ?? 0}</div><div class="stat-label">Exclues sans prix</div></div>
         <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${data.excludedNonEur ?? 0}</div><div class="stat-label">Exclues non EUR</div></div>
       </div>
@@ -654,6 +674,25 @@ function renderPricingPage() {
     content.querySelectorAll('.card-item[data-id]').forEach(el => {
       el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
     });
+
+    const recomputeBtn = document.getElementById('recomputeValueBtn');
+    if (recomputeBtn) {
+      recomputeBtn.addEventListener('click', () => {
+        recomputeBtn.disabled = true;
+        recomputeBtn.textContent = '⏳ Recalcul…';
+        api.recomputeValue()
+          .then(() => {
+            showToast('Snapshot mis à jour');
+            return loadPricingData();
+          })
+          .catch(err => {
+            const detail = err.rootCause && err.rootCause !== err.message ? ` (${err.rootCause})` : '';
+            showToast(`Échec du recalcul : ${err.message}${detail}`, { error: true, duration: 6000 });
+            recomputeBtn.disabled = false;
+            recomputeBtn.textContent = '🔄 Recalculer';
+          });
+      });
+    }
 
     return Promise.all([
       api.getTrend(),

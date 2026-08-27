@@ -32,6 +32,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -189,6 +190,26 @@ class PricingInsightsIntegrationTest {
                 .andExpect(jsonPath("$[0].value30dEur").value(100.0))
                 .andExpect(jsonPath("$[0].delta7dPercent").value(25.0))
                 .andExpect(jsonPath("$[0].delta30dPercent").value(50.0));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("recompute-value persists a fresh snapshot from current collection")
+    void recomputeValue_persistsFreshSnapshot() throws Exception {
+        Edition edition = saveEdition("TFC", "Premier Chapitre", 1);
+        Card card = saveCard(edition, "priced", new BigDecimal("5.00"), "EUR", LocalDateTime.now());
+        saveCollection(card, 2, 0);
+
+        assertThat(collectionValueSnapshotRepository.findAllByOrderByRecordedAtAsc()).isEmpty();
+
+        mockMvc.perform(post("/api/pricing/recompute-value"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        List<CollectionValueSnapshot> snapshots = collectionValueSnapshotRepository.findAllByOrderByRecordedAtAsc();
+        assertThat(snapshots).hasSize(1);
+        assertThat(snapshots.get(0).getTotalCollectionValueEur()).isEqualByComparingTo("10.00");
+        assertThat(editionValueSnapshotRepository.findByEditionIdOrderByRecordedAtAsc(edition.getId())).hasSize(1);
     }
 
     private void saveGlobalSnapshot(LocalDateTime recordedAt, String value) {
