@@ -79,6 +79,7 @@ public class PricingSyncService {
             int episodeCardsPagesProcessed = 0;
             int unresolvedDiagnosticLogs = 0;
             Map<String, Integer> statusCounts = new LinkedHashMap<>();
+            String lastErrorDetail = null;
             boolean configMissingBlocked = false;
             PricingSettingsService.CursorState cursor = pricingSettingsService.getCursor();
             if (cursor == null) {
@@ -131,6 +132,7 @@ public class PricingSyncService {
                 if (!episodesPage.success()) {
                     errorCount++;
                     statusCounts.merge(normalizeStatus(episodesPage.status()), 1, Integer::sum);
+                    lastErrorDetail = episodesPage.details();
                     stopReason = "EPISODES_REQUEST_ERROR";
                     break;
                 }
@@ -204,6 +206,7 @@ public class PricingSyncService {
                         if (!cardsPage.success()) {
                             errorCount++;
                             statusCounts.merge(normalizeStatus(cardsPage.status()), 1, Integer::sum);
+                            lastErrorDetail = cardsPage.details();
                             stopReason = "EPISODE_CARDS_REQUEST_ERROR";
                             stop = true;
                             break;
@@ -322,6 +325,7 @@ public class PricingSyncService {
             }
             report.put("cursor", reportCursor.toMap());
             report.put("stopReason", stopReason);
+            report.put("lastErrorDetail", lastErrorDetail);
 
             String reasonCode = "COMPLETED";
             String message = "Synchronisation pricing terminée.";
@@ -359,7 +363,7 @@ public class PricingSyncService {
             report.put("message", message);
 
             log.info(
-                        "Pricing sync completed (trigger={}, attempted={}, success={}, unresolved={}, errors={}, budgetBlocked={}, remainingAttempts={}, reason={}, stopReason={}, statusCounts={})",
+                        "Pricing sync completed (trigger={}, attempted={}, success={}, unresolved={}, errors={}, budgetBlocked={}, remainingAttempts={}, reason={}, stopReason={}, statusCounts={}, lastErrorDetail={})",
                     trigger,
                     attempted,
                     successCount,
@@ -369,7 +373,8 @@ public class PricingSyncService {
                     budget.get("remainingAttempts"),
                         reasonCode,
                         stopReason,
-                        statusCounts
+                        statusCounts,
+                        lastErrorDetail
             );
             if ("COMPLETED".equals(reasonCode) || "MAX_ATTEMPTS_REACHED".equals(reasonCode)) {
                 collectionValueTrendService.persistSnapshotFromCurrentCollection();
