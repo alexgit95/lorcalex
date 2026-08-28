@@ -590,9 +590,10 @@ function cardItemHTML(card) {
   const totalQty = (card.quantity || 0) + (card.foilQuantity || 0);
   const hasFoil = card.foilQuantity && card.foilQuantity > 0;
   const showWanted = card.wanted && !card.owned;
+  const gridImageUrl = card.thumbnailUrl || card.imageUrl;
   return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}${showWanted ? ' wanted' : ''}" data-id="${card.id}">
-    ${card.imageUrl
-      ? `<img data-src="${esc(card.imageUrl)}" alt="${esc(card.name)}" class="card-img-lazy" onerror="this.style.display='none'" />`
+    ${gridImageUrl
+      ? `<img data-src="${esc(gridImageUrl)}" alt="${esc(card.name)}" class="card-img-lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
     ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
     ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : `<button class="wanted-toggle${card.wanted ? ' active' : ''}" data-id="${card.id}" title="Marquer comme voulue">${card.wanted ? '⭐' : '☆'}</button>`}

@@ -7,6 +7,14 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Onglet Collection : les images affichées dans la grille utilisent désormais la miniature (au lieu de l'image pleine résolution), avec repli automatique sur l'image pleine résolution si aucune miniature n'est disponible ; la vue détail continue d'afficher l'image pleine résolution. Les réponses de listage de cartes (grille, recherche) n'incluent plus le texte de règles (`bodyText`/`flavorText`), réduisant la taille des réponses API ; la récupération d'une carte unique par id conserve ce texte.
+
+---
+
 ## [2.9.5]
 
 ### Added

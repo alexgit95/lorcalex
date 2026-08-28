@@ -38,7 +38,7 @@ public class CardService {
                 .collect(Collectors.toMap(uc -> uc.getCard().getId(), uc -> uc));
 
         return cards.stream()
-                .map(card -> toDTO(card, ownedMap.get(card.getId())))
+                .map(card -> toDTO(card, ownedMap.get(card.getId()), false))
                 .collect(Collectors.toList());
     }
 
@@ -56,7 +56,7 @@ public class CardService {
                             return (e != null && e.getSetNumber() != null) ? e.getSetNumber() : Integer.MAX_VALUE;
                         })
                         .thenComparingInt(c -> c.getCardNumber() != null ? c.getCardNumber() : Integer.MAX_VALUE))
-                .map(card -> toDTO(card, ownedMap.get(card.getId())))
+                .map(card -> toDTO(card, ownedMap.get(card.getId()), false))
                 .collect(Collectors.toList());
     }
 
@@ -71,7 +71,7 @@ public class CardService {
                         .thenComparingInt(c -> c.getCardNumber() != null ? c.getCardNumber() : Integer.MAX_VALUE))
                 .map(card -> {
                     Optional<UserCollection> uc = collectionRepository.findByCardId(card.getId());
-                    return toDTO(card, uc.orElse(null));
+                    return toDTO(card, uc.orElse(null), false);
                 })
                 .collect(Collectors.toList());
     }
@@ -113,6 +113,10 @@ public class CardService {
     }
 
     public CardDTO toDTO(Card card, UserCollection uc) {
+        return toDTO(card, uc, true);
+    }
+
+    public CardDTO toDTO(Card card, UserCollection uc, boolean includeRulesText) {
         CardDTO dto = new CardDTO();
         dto.setId(card.getId());
         dto.setName(card.getName());
@@ -122,9 +126,12 @@ public class CardService {
         dto.setInkColor(card.getInkColor());
         dto.setType(card.getType());
         dto.setSubtypes(card.getSubtypes());
-        dto.setBodyText(card.getBodyText());
-        dto.setFlavorText(card.getFlavorText());
+        if (includeRulesText) {
+            dto.setBodyText(card.getBodyText());
+            dto.setFlavorText(card.getFlavorText());
+        }
         dto.setImageUrl(card.getImageUrl());
+        dto.setThumbnailUrl(card.getThumbnailUrl());
         dto.setArtist(card.getArtist());
         dto.setInkable(card.getInkable());
         dto.setMarketPrice(card.getMarketPrice());
