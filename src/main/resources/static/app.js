@@ -1162,6 +1162,31 @@ function iconWithFallback(src, label, sizePx) {
   </span>`;
 }
 
+// preloaded once so Chart.js can draw them as x-axis tick icons (see rarityIconTicksPlugin)
+const RARITY_ICON_IMAGES = {};
+RARITY_ORDER.forEach(r => {
+  const img = new Image();
+  img.src = `icons/rarity/${normalizeIconName(r)}.png`;
+  RARITY_ICON_IMAGES[r] = img;
+});
+
+const rarityIconTicksPlugin = {
+  id: 'rarityIconTicks',
+  afterDraw(chart) {
+    const xScale = chart.scales?.x;
+    if (!xScale) return;
+    const ctx = chart.ctx;
+    const labels = chart.data.labels || [];
+    const size = 20;
+    labels.forEach((label, i) => {
+      const img = RARITY_ICON_IMAGES[label];
+      if (!img || !img.complete || img.naturalWidth === 0) return;
+      const x = xScale.getPixelForTick(i);
+      ctx.drawImage(img, x - size / 2, xScale.bottom + 6, size, size);
+    });
+  },
+};
+
 function buildMissingByColorTable(stats) {
   const editionsWithMissing = (stats.byEdition || []).filter(e => e.missingCards > 0);
   if (editionsWithMissing.length === 0) return '';
@@ -1325,7 +1350,7 @@ function renderStatistics() {
       }
       const rarities = Object.keys(rarityMap);
       if (rarities.length > 0) {
-        new Chart(document.getElementById('globalRarityBar'), {
+        const globalRarityChart = new Chart(document.getElementById('globalRarityBar'), {
           type: 'bar',
           data: {
             labels: rarities,
@@ -1334,7 +1359,20 @@ function renderStatistics() {
               { label: 'Manquantes', data: rarities.map(r => rarityMap[r].missing), backgroundColor: '#ef5350' },
             ],
           },
-          options: stackedOpts,
+          options: {
+            ...stackedOpts,
+            layout: { padding: { bottom: 26 } },
+            scales: {
+              ...stackedOpts.scales,
+              x: { ...stackedOpts.scales.x, ticks: { ...stackedOpts.scales.x.ticks, callback: () => '' } },
+            },
+          },
+          plugins: [rarityIconTicksPlugin],
+        });
+        // icons may still be loading on first render; redraw once each finishes
+        rarities.forEach(r => {
+          const img = RARITY_ICON_IMAGES[r];
+          if (img && !img.complete) img.onload = () => globalRarityChart.update();
         });
       }
     }
