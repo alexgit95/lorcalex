@@ -82,6 +82,24 @@ class PricingSettingsServiceTest {
         assertThat(status.get("remainingAttempts")).isEqualTo(0);
     }
 
+    @Test
+    @DisplayName("isHighPriceLogEnabled defaults to true and honors explicit setting")
+    void isHighPriceLogEnabled_defaultsTrueAndRespectsSetting() {
+        assertThat(service.isHighPriceLogEnabled()).isTrue();
+
+        put(PricingSettingsService.KEY_LOG_HIGH_PRICE_ENABLED, "false");
+        assertThat(service.isHighPriceLogEnabled()).isFalse();
+    }
+
+    @Test
+    @DisplayName("isUnresolvedMappingLogEnabled defaults to false and honors explicit setting")
+    void isUnresolvedMappingLogEnabled_defaultsFalseAndRespectsSetting() {
+        assertThat(service.isUnresolvedMappingLogEnabled()).isFalse();
+
+        put(PricingSettingsService.KEY_LOG_UNRESOLVED_MAPPING_ENABLED, "true");
+        assertThat(service.isUnresolvedMappingLogEnabled()).isTrue();
+    }
+
     private void put(String key, String value) {
         store.put(key, new AppSettings(key, value, "test"));
     }

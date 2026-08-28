@@ -2013,6 +2013,8 @@ function renderAdmin() {
       return row && row.settingValue != null ? String(row.settingValue) : fallback;
     };
     const pricingSyncEnabled = settingVal('pricing_sync_enabled', 'true');
+    const pricingLogHighPriceEnabled = settingVal('pricing_log_high_price_enabled', 'true');
+    const pricingLogUnresolvedMappingEnabled = settingVal('pricing_log_unresolved_mapping_enabled', 'false');
     const pricingDailyHardLimit = settingVal('pricing_daily_hard_limit', settingVal('pricing_daily_budget', '100'));
     const pricingDailySafetyMargin = settingVal('pricing_daily_safety_margin', '5');
     const pricingMinuteLimit = settingVal('pricing_minute_limit', '30');
@@ -2080,6 +2082,23 @@ function renderAdmin() {
             <span style="display:block;margin-bottom:4px">Hard cap journalier (max 100)</span>
             <input id="pricingDailyHardLimit" type="number" min="0" max="100" value="${esc(pricingDailyHardLimit)}"
               style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Log "High market price"</span>
+            <select id="pricingLogHighPriceEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingLogHighPriceEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingLogHighPriceEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Log diagnostic "Unresolved mapping"</span>
+            <select id="pricingLogUnresolvedMappingEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingLogUnresolvedMappingEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingLogUnresolvedMappingEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
           </label>
         </div>
 
@@ -2333,6 +2352,8 @@ function renderAdmin() {
 
     document.getElementById('pricingSaveBtn').addEventListener('click', async () => {
       const syncEnabled = document.getElementById('pricingSyncEnabled').value;
+      const logHighPriceEnabled = document.getElementById('pricingLogHighPriceEnabled').value;
+      const logUnresolvedMappingEnabled = document.getElementById('pricingLogUnresolvedMappingEnabled').value;
       const dailyHardLimit = document.getElementById('pricingDailyHardLimit').value.trim();
       const dailySafetyMargin = document.getElementById('pricingDailySafetyMargin').value.trim();
       const minuteLimit = document.getElementById('pricingMinuteLimit').value.trim();
@@ -2346,6 +2367,8 @@ function renderAdmin() {
       try {
         await Promise.all([
           api.updateSetting('pricing_sync_enabled', syncEnabled),
+          api.updateSetting('pricing_log_high_price_enabled', logHighPriceEnabled),
+          api.updateSetting('pricing_log_unresolved_mapping_enabled', logUnresolvedMappingEnabled),
           api.updateSetting('pricing_daily_hard_limit', dailyHardLimit || '100'),
           api.updateSetting('pricing_daily_budget', dailyHardLimit || '100'),
           api.updateSetting('pricing_daily_safety_margin', dailySafetyMargin || '0'),

@@ -1,5 +1,8 @@
 package com.alexgit95.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.alexgit95.model.Card;
 import com.alexgit95.repository.CardRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -150,6 +153,114 @@ class PricingSyncServiceTest {
         assertThat(report.get("unresolvedCount")).isEqualTo(1);
         assertThat(report.get("errorCount")).isEqualTo(0);
         }
+
+    @Test
+    @DisplayName("High market price log is emitted when enabled and suppressed when disabled")
+    void runSync_highPriceLog_respectsToggle() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isHighPriceLogEnabled()).thenReturn(true);
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(row("TFC", 1, "999.00")),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().contains("High market price detected"));
+    }
+
+    @Test
+    @DisplayName("High market price log is suppressed when the setting is disabled")
+    void runSync_highPriceLog_suppressedWhenDisabled() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isHighPriceLogEnabled()).thenReturn(false);
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(row("TFC", 1, "999.00")),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("High market price detected"));
+    }
+
+    @Test
+    @DisplayName("Unresolved mapping diagnostic is logged once per unresolved row when enabled, not capped at 3")
+    void runSync_unresolvedMappingLog_emittedPerRowWhenEnabled() {
+        when(pricingSettingsService.isUnresolvedMappingLogEnabled()).thenReturn(true);
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        Map<String, Object> report = pricingSyncService.applyManualPricingImport(
+                "[{}, {}, {}, {}, {}]");
+        detachLogAppender(appender);
+
+        assertThat(report.get("unresolvedCount")).isEqualTo(5);
+        long unresolvedLogLines = appender.list.stream()
+                .filter(e -> e.getFormattedMessage().contains("Unresolved mapping"))
+                .count();
+        assertThat(unresolvedLogLines).isEqualTo(5);
+        @SuppressWarnings("unchecked")
+        List<String> mappingSamples = (List<String>) report.get("mappingSamples");
+        assertThat(mappingSamples).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("Unresolved mapping diagnostic is suppressed when disabled, but mappingSamples cap is unaffected")
+    void runSync_unresolvedMappingLog_suppressedWhenDisabled() {
+        when(pricingSettingsService.isUnresolvedMappingLogEnabled()).thenReturn(false);
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        Map<String, Object> report = pricingSyncService.applyManualPricingImport(
+                "[{}, {}, {}, {}, {}]");
+        detachLogAppender(appender);
+
+        assertThat(report.get("unresolvedCount")).isEqualTo(5);
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("Unresolved mapping"));
+        @SuppressWarnings("unchecked")
+        List<String> mappingSamples = (List<String>) report.get("mappingSamples");
+        assertThat(mappingSamples).hasSize(3);
+    }
+
+    private static ListAppender<ILoggingEvent> attachLogAppender() {
+        Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(PricingSyncService.class);
+        // test profile lowers this logger to WARN; force INFO so the assertions below can observe it
+        logger.setLevel(ch.qos.logback.classic.Level.INFO);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void detachLogAppender(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(PricingSyncService.class);
+        logger.detachAppender(appender);
+        logger.setLevel(null);
+        appender.stop();
+    }
 
     @Test
     @DisplayName("runSync does not consume attempt when provider config is missing")

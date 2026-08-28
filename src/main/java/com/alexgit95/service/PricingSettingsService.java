@@ -34,6 +34,8 @@ public class PricingSettingsService {
     public static final String KEY_CURSOR_EPISODE_ID = "pricing_cursor_episode_id";
     public static final String KEY_CURSOR_EPISODE_CARDS_PAGE = "pricing_cursor_episode_cards_page";
     public static final String KEY_LAST_STOP_REASON = "pricing_last_stop_reason";
+    public static final String KEY_LOG_HIGH_PRICE_ENABLED = "pricing_log_high_price_enabled";
+    public static final String KEY_LOG_UNRESOLVED_MAPPING_ENABLED = "pricing_log_unresolved_mapping_enabled";
 
     private static final int MAX_HARD_LIMIT = 100;
     private static final int MAX_MINUTE_LIMIT = 30;
@@ -46,6 +48,14 @@ public class PricingSettingsService {
 
     public synchronized boolean isSyncEnabled() {
         return parseBoolean(getValueOrDefault(KEY_SYNC_ENABLED, "true"), true);
+    }
+
+    public synchronized boolean isHighPriceLogEnabled() {
+        return parseBoolean(getValueOrDefault(KEY_LOG_HIGH_PRICE_ENABLED, "true"), true);
+    }
+
+    public synchronized boolean isUnresolvedMappingLogEnabled() {
+        return parseBoolean(getValueOrDefault(KEY_LOG_UNRESOLVED_MAPPING_ENABLED, "false"), false);
     }
 
     public synchronized int getDailyBudget() {

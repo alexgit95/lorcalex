@@ -434,6 +434,8 @@ Les clés de configuration pricing sont stockées dans `app_settings` et modifia
 - `pricing_cursor_episode_id`
 - `pricing_cursor_episode_cards_page`
 - `pricing_last_stop_reason`
+- `pricing_log_high_price_enabled` : active/désactive le log `"High market price detected"` (défaut : `true`, comportement historique inchangé).
+- `pricing_log_unresolved_mapping_enabled` : active/désactive un log de diagnostic (une ligne par carte) pour chaque carte en `UNRESOLVED_MAPPING`, incluant le payload provider brut et les critères de recherche testés (défaut : `false`, à activer ponctuellement pour déboguer). Ce log n'affecte pas les échantillons `mappingSamples` (toujours plafonnés à 3) renvoyés dans les rapports de synchronisation. Ces deux réglages sont modifiables depuis l'onglet Admin, section "Synchronisation des prix".
 
 ### Import / Export et restauration
 

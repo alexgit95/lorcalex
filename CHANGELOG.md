@@ -7,6 +7,14 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Deux réglages admin indépendants pour le débogage pricing : `pricing_log_high_price_enabled` (active/désactive le log `"High market price detected"`, défaut `true`) et `pricing_log_unresolved_mapping_enabled` (active/désactive un log détaillé par carte non mappée, incluant le payload provider et les critères de recherche testés, défaut `false`). Ces réglages sont modifiables depuis l'onglet Admin sans redémarrage de l'application.
+
+---
+
 ## [2.9.0]
 
 ### Added

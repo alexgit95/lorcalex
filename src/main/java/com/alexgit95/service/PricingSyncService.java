@@ -491,6 +491,9 @@ public class PricingSyncService {
                 if (mappingSamples.size() < 3) {
                     mappingSamples.add(buildRowDiagnostic(row));
                 }
+                if (pricingSettingsService.isUnresolvedMappingLogEnabled()) {
+                    log.info("Unresolved mapping ({}, providerRow={})", buildRowDiagnostic(row), row);
+                }
                 continue;
             }
             BigDecimalPrice price = extractPriceFromRow(row);
@@ -520,7 +523,7 @@ public class PricingSyncService {
             cardRepository.save(card);
             statusCounts.merge("SUCCESS", 1, Integer::sum);
             updated++;
-            if (row.price.compareTo(HIGH_PRICE_LOG_THRESHOLD) > 0) {
+            if (pricingSettingsService.isHighPriceLogEnabled() && row.price.compareTo(HIGH_PRICE_LOG_THRESHOLD) > 0) {
                 log.info("High market price detected (cardId={}, externalId={}, price={}, providerRow={})",
                         card.getId(), card.getExternalId(), row.price, row.rawRow);
             }
