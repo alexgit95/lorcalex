@@ -13,6 +13,10 @@ et ce projet respecte la Versioning Sémantique.
 
 - Deux réglages admin indépendants pour le débogage pricing : `pricing_log_high_price_enabled` (active/désactive le log `"High market price detected"`, défaut `true`) et `pricing_log_unresolved_mapping_enabled` (active/désactive un log détaillé par carte non mappée, incluant le payload provider et les critères de recherche testés, défaut `false`). Ces réglages sont modifiables depuis l'onglet Admin sans redémarrage de l'application.
 
+### Changed
+
+- Onglet Stats : les graphiques "Cartes par rareté" par édition sont remplacés par un tableau "Manquantes par édition" affichant, par édition suivie, le nombre de cartes manquantes ventilé par couleur d'encre et par rareté (icônes officielles, sous-total par couleur, colonne Total), plus compact que N graphiques.
+
 ---
 
 ## [2.9.0]

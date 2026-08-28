@@ -1142,6 +1142,76 @@ async function updateQtyFoiled(cardId, qty) {
 
 // ─── STATISTICS ───────────────────────────────────────────────────────────────
 
+const INK_COLORS = ['Ambre', 'Améthyste', 'Émeraude', 'Rubis', 'Saphir', 'Acier'];
+const RARITY_ORDER = ['Commune', 'Inhabituelle', 'Rare', 'Très Rare', 'Légendaire'];
+
+function normalizeIconName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '');
+}
+
+// <img> with a text fallback shown if the icon file fails to load (accessibility + resilience)
+function iconWithFallback(src, label, sizePx) {
+  return `<span>
+    <img src="${src}" alt="${esc(label)}" title="${esc(label)}"
+      style="width:${sizePx}px;height:${sizePx}px;vertical-align:middle"
+      onerror="this.style.display='none';this.nextElementSibling.style.display='inline'" />
+    <span style="display:none;font-size:.75rem">${esc(label)}</span>
+  </span>`;
+}
+
+function buildMissingByColorTable(stats) {
+  const editionsWithMissing = (stats.byEdition || []).filter(e => e.missingCards > 0);
+  if (editionsWithMissing.length === 0) return '';
+
+  const headerCells = INK_COLORS.map(color => `
+    <th style="text-align:center;padding:8px 10px">${iconWithFallback(`icons/ink/${normalizeIconName(color)}.png`, color, 26)}</th>`).join('');
+
+  const rows = editionsWithMissing.map(e => {
+    const missingByColor = e.missingByColor || [];
+    const cells = INK_COLORS.map(color => {
+      const entry = missingByColor.find(m => m.inkColor === color);
+      const ordered = entry
+        ? RARITY_ORDER.map(r => (entry.byRarity || []).find(rc => rc.rarity === r)).filter(Boolean)
+        : [];
+      if (ordered.length === 0) {
+        return '<td style="text-align:center;color:var(--text-muted);border-bottom:1px solid var(--border)">—</td>';
+      }
+      const total = ordered.reduce((sum, rc) => sum + rc.missingCards, 0);
+      const pills = ordered.map(rc => `
+        <span style="display:inline-flex;align-items:center;gap:3px;margin:1px 4px 1px 0;white-space:nowrap">
+          ${iconWithFallback(`icons/rarity/${normalizeIconName(rc.rarity)}.png`, rc.rarity, 14)}
+          <span style="font-size:.78rem">${rc.missingCards}</span>
+        </span>`).join('');
+      return `<td style="border-bottom:1px solid var(--border)">${pills}<span style="display:block;margin-top:4px;font-size:.75rem;color:var(--text-muted)">(=${total})</span></td>`;
+    }).join('');
+    return `<tr>
+      <td style="font-weight:700;white-space:nowrap;padding:8px 10px;border-bottom:1px solid var(--border)">${esc(e.editionName)}</td>
+      ${cells}
+      <td style="text-align:center;font-weight:700;color:#ffca28;padding:8px 10px;border-bottom:1px solid var(--border)">${e.missingCards}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="chart-container">
+      <h3>Manquantes par édition</h3>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%;font-size:.85rem">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:8px 10px">Édition</th>
+              ${headerCells}
+              <th style="padding:8px 10px">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function renderStatistics() {
   document.getElementById('app').innerHTML = `
     <div class="app">
@@ -1171,13 +1241,7 @@ function renderStatistics() {
         </div>
       </div>`).join('');
 
-    const rarityCharts = stats.byEdition
-      .filter(e => e.byRarity?.length > 0)
-      .map((e, i) => `
-        <div class="chart-container">
-          <h3>${esc(e.editionName || e.editionCode || `Set ${i + 1}`)}</h3>
-          <div style="height:180px"><canvas id="rarityChart${i}"></canvas></div>
-        </div>`).join('');
+    const missingByColorTable = buildMissingByColorTable(stats);
 
     content.innerHTML = `
       <div class="stats-grid">
@@ -1208,7 +1272,7 @@ function renderStatistics() {
         <div style="height:220px"><canvas id="globalRarityBar"></canvas></div>
       </div>` : ''}
 
-      ${rarityCharts}`;
+      ${missingByColorTable}`;
 
     const legendColor = '#e8eaf6';
     const tickColor = '#90a4ae';
@@ -1273,21 +1337,6 @@ function renderStatistics() {
           options: stackedOpts,
         });
       }
-
-      // Per-edition rarity charts
-      stats.byEdition.filter(e => e.byRarity?.length > 0).forEach((e, i) => {
-        new Chart(document.getElementById(`rarityChart${i}`), {
-          type: 'bar',
-          data: {
-            labels: e.byRarity.map(r => r.rarity),
-            datasets: [
-              { label: 'Possédées', data: e.byRarity.map(r => r.ownedCards), backgroundColor: '#66bb6a' },
-              { label: 'Manquantes', data: e.byRarity.map(r => r.missingCards), backgroundColor: '#ef5350' },
-            ],
-          },
-          options: { ...stackedOpts, maintainAspectRatio: false },
-        });
-      });
     }
   });
 }
