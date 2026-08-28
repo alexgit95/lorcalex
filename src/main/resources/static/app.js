@@ -183,6 +183,7 @@ function handleRoute() {
   stopCamera(); // clean up scanner camera if leaving scanner page
   stopSyncPoll(); // stop admin progress polling
   disconnectCollectionColumnObserver(); // stop column resize tracking if leaving collection page
+  stopWantedCelebration(); // stop looping confetti if leaving scanner page
   renderPage(page);
 }
 
@@ -1757,6 +1758,7 @@ function setScannerCameraVisible(visible) {
 }
 
 function restartScannerCapture() {
+  stopWantedCelebration();
   setScannerCameraVisible(true);
   setScanAlert('');
   setScanDebug([]);
@@ -2042,7 +2044,11 @@ function renderCardConfirmation(card) {
 }
 
 // Overlay non-bloquant de confettis, déclenché à la reconnaissance d'une carte voulue.
+// Tourne en boucle jusqu'à stopWantedCelebration() (relance du scan).
+let _wantedCelebrationOverlay = null;
+
 function celebrateWantedCardScan() {
+  stopWantedCelebration();
   const overlay = document.createElement('div');
   overlay.className = 'confetti-overlay';
   const colors = ['#d4af37', '#ff6f61', '#4fc3f7', '#81c784', '#ba68c8', '#ffd54f'];
@@ -2051,12 +2057,19 @@ function celebrateWantedCardScan() {
     piece.className = 'confetti-piece';
     piece.style.left = `${Math.random() * 100}%`;
     piece.style.background = colors[i % colors.length];
-    piece.style.animationDelay = `${Math.random() * 0.4}s`;
+    piece.style.animationDelay = `${Math.random() * 1.6}s`;
     piece.style.animationDuration = `${1.1 + Math.random() * 0.6}s`;
     overlay.appendChild(piece);
   }
   document.body.appendChild(overlay);
-  setTimeout(() => overlay.remove(), 2000);
+  _wantedCelebrationOverlay = overlay;
+}
+
+function stopWantedCelebration() {
+  if (_wantedCelebrationOverlay) {
+    _wantedCelebrationOverlay.remove();
+    _wantedCelebrationOverlay = null;
+  }
 }
 
 
