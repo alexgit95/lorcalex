@@ -466,6 +466,7 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 | `GET` | `/api/cards/{id}` | JWT | Détail carte |
 | `GET` | `/api/cards/lookup?number=&editionId=` | JWT | Lookup scanner |
 | `GET` | `/api/cards/fingerprints` | JWT | Empreintes visuelles |
+| `PATCH` | `/api/cards/{id}/wanted` | JWT | Marque/démarque une carte comme "voulue" |
 | `GET/POST` | `/api/collection` | JWT | Collection possédée |
 | `GET` | `/api/collection/recent?limit=20` | JWT | Derniers scans (10/20/25/50) |
 | `PUT` | `/api/collection/{cardId}` | JWT | Modifier quantités |

@@ -102,6 +102,16 @@ public class CardService {
                 .toList();
     }
 
+    public Optional<CardDTO> setWanted(Long cardId, boolean wanted) {
+        return cardRepository.findById(cardId)
+                .map(card -> {
+                    card.setWanted(wanted);
+                    cardRepository.save(card);
+                    Optional<UserCollection> uc = collectionRepository.findByCardId(cardId);
+                    return toDTO(card, uc.orElse(null));
+                });
+    }
+
     public CardDTO toDTO(Card card, UserCollection uc) {
         CardDTO dto = new CardDTO();
         dto.setId(card.getId());
@@ -122,6 +132,7 @@ public class CardService {
         dto.setPriceSource(card.getPriceSource());
         dto.setLastPriceAt(card.getLastPriceAt());
         dto.setLastPriceStatus(card.getLastPriceStatus());
+        dto.setWanted(Boolean.TRUE.equals(card.getWanted()));
         if (card.getEdition() != null) {
             dto.setEditionId(card.getEdition().getId());
             dto.setEditionName(card.getEdition().getName());

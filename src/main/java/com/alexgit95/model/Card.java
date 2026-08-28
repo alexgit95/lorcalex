@@ -63,6 +63,9 @@ public class Card {
 
     private String lastPriceStatus;
 
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private Boolean wanted = false;
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "edition_id")
     private Edition edition;

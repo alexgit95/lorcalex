@@ -58,6 +58,9 @@ const api = {
 
   getFingerprints: () => apiFetch('/cards/fingerprints'),
 
+  setWanted: (cardId, wanted) =>
+    apiFetch(`/cards/${cardId}/wanted`, { method: 'PATCH', body: JSON.stringify({ wanted }) }),
+
   addToCollection: (cardId, quantity = 1, foilQuantity = 0) =>
     apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity, foilQuantity }) }),
 
@@ -492,6 +495,20 @@ function renderCards() {
   area.querySelectorAll('.card-item').forEach(el => {
     el.addEventListener('click', () => openModal(parseInt(el.dataset.id)));
   });
+  area.querySelectorAll('.wanted-toggle').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleWantedInGrid(parseInt(el.dataset.id));
+    });
+  });
+}
+
+async function toggleWantedInGrid(cardId) {
+  const card = collState.cards.find(c => c.id === cardId);
+  if (!card) return;
+  const updated = await api.setWanted(cardId, !card.wanted);
+  collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  renderCards();
 }
 
 function cardItemHTML(card) {
@@ -499,12 +516,13 @@ function cardItemHTML(card) {
   const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
   const totalQty = (card.quantity || 0) + (card.foilQuantity || 0);
   const hasFoil = card.foilQuantity && card.foilQuantity > 0;
-  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}" data-id="${card.id}">
+  const showWanted = card.wanted && !card.owned;
+  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}${showWanted ? ' wanted' : ''}" data-id="${card.id}">
     ${card.imageUrl
       ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
     ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
-    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : ''}
+    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : `<button class="wanted-toggle${card.wanted ? ' active' : ''}" data-id="${card.id}" title="Marquer comme voulue">${card.wanted ? '⭐' : '☆'}</button>`}
     <div class="card-info">
       <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
       <div class="card-name">${esc(card.name)}</div>
@@ -1893,10 +1911,12 @@ function renderCardConfirmation(card) {
   if (!area) return;
   setScanAlert('');
   setScanDebug([]);
+  if (card.wanted) celebrateWantedCardScan();
   const isNewCard = !card.owned;
+  const showWanted = card.wanted && !card.owned;
   const imgHtml = card.imageUrl
-    ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)" onerror="this.style.display='none'" />`
-    : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem">🃏</div>`;
+    ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)${showWanted ? ';border:2px solid #d4af37' : ''}" onerror="this.style.display='none'" />`
+    : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem${showWanted ? ';border:2px solid #d4af37' : ''}">🃏</div>`;
   const newCardBanner = isNewCard
     ? `<div style="background:#d32f2f;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:4px 8px;border-radius:6px;margin-bottom:6px;text-align:center">Nouvelle carte</div>`
     : '';
@@ -1911,7 +1931,10 @@ function renderCardConfirmation(card) {
           ${imgHtml}
         </div>
         <div style="flex:1">
-          <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
+            <button class="wanted-toggle${card.wanted ? ' active' : ''}" id="confirmWantedToggleBtn" title="Marquer comme voulue">${card.wanted ? '⭐' : '☆'}</button>
+          </div>
           <div style="font-size:.78rem;color:var(--primary-light);font-weight:700;margin-top:4px">${esc(card.editionCode)}</div>
           <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">#${esc(String(card.cardNumber))} · ${esc(card.rarity)}</div>
           ${ownedInfo}
@@ -1937,7 +1960,31 @@ function renderCardConfirmation(card) {
     restartScannerCapture();
   });
   document.getElementById('restartScanBtn').addEventListener('click', restartScannerCapture);
+  document.getElementById('confirmWantedToggleBtn').addEventListener('click', async () => {
+    const updated = await api.setWanted(card.id, !card.wanted);
+    card.wanted = updated.wanted;
+    renderCardConfirmation(card);
+  });
 }
+
+// Overlay non-bloquant de confettis, déclenché à la reconnaissance d'une carte voulue.
+function celebrateWantedCardScan() {
+  const overlay = document.createElement('div');
+  overlay.className = 'confetti-overlay';
+  const colors = ['#d4af37', '#ff6f61', '#4fc3f7', '#81c784', '#ba68c8', '#ffd54f'];
+  for (let i = 0; i < 40; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.animationDelay = `${Math.random() * 0.4}s`;
+    piece.style.animationDuration = `${1.1 + Math.random() * 0.6}s`;
+    overlay.appendChild(piece);
+  }
+  document.body.appendChild(overlay);
+  setTimeout(() => overlay.remove(), 2000);
+}
+
 
 function renderFoundCards(cards) {
   const area = document.getElementById('foundCardsArea');

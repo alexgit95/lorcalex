@@ -149,6 +149,57 @@ body {
   font-weight: bold;
 }
 
+/* Wanted marker: gold border overlay while the card is not yet owned. */
+.card-item.wanted {
+  border-color: #d4af37;
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.5);
+}
+
+.wanted-toggle {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  color: #d4af37;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.wanted-toggle.active {
+  color: #ffd54f;
+}
+
+/* Non-blocking confetti overlay for the scan celebration. */
+.confetti-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 9999;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confetti-fall linear forwards;
+}
+
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(360deg); opacity: 0.8; }
+}
+
 /* Rarity colors */
 .rarity-Common { color: #bdbdbd; }
 .rarity-Uncommon { color: #81d4fa; }
