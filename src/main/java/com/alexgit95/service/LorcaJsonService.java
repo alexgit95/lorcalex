@@ -23,6 +23,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.List;
 import java.util.Optional;
@@ -400,6 +401,8 @@ public class LorcaJsonService {
                 
                 uc.setQuantity(newRegularQty);
                 uc.setFoilQuantity(newFoilQty);
+                // Genuine collection change: surface this card in "Récents".
+                uc.setLastAddedAt(LocalDateTime.now());
                 userCollectionRepository.save(uc);
                 imported++;
             }

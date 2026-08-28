@@ -17,6 +17,10 @@ et ce projet respecte la Versioning Sémantique.
 
 - Onglet Stats : les graphiques "Cartes par rareté" par édition sont remplacés par un tableau "Manquantes par édition" affichant, par édition suivie, le nombre de cartes manquantes ventilé par couleur d'encre et par rareté (icônes officielles, sous-total par couleur, colonne Total), plus compact que N graphiques.
 
+### Fixed
+
+- Onglet Récents : une réparation technique en arrière-plan (correction du flag foil incohérent au démarrage) ne fait plus remonter à tort de vieilles cartes en tête de liste ; seuls un ajout, une modification manuelle de quantité ou un import Companion mettent désormais à jour la date de dernière activité d'une carte.
+
 ---
 
 ## [2.9.0]

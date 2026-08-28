@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import org.springframework.data.domain.PageRequest;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -59,6 +60,8 @@ public class CollectionService {
             return cardService.toDTO(card, null);
         }
 
+        // Genuine collection change: surface this card in "Récents".
+        uc.setLastAddedAt(LocalDateTime.now());
         collectionRepository.save(uc);
         return cardService.toDTO(card, uc);
     }
@@ -80,6 +83,8 @@ public class CollectionService {
         uc.setQuantity(Math.max(0, quantity));
         uc.setFoilQuantity(Math.max(0, foilQuantity));
         uc.setFoil(uc.getFoilQuantity() > 0);
+        // Genuine collection change: surface this card in "Récents".
+        uc.setLastAddedAt(LocalDateTime.now());
         collectionRepository.save(uc);
         return cardService.toDTO(card, uc);
     }

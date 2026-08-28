@@ -15,6 +15,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -84,6 +85,22 @@ class CollectionServiceTest {
         assertThat(captor.getValue().getQuantity()).isEqualTo(1);
         assertThat(result.getFoil()).isFalse();
         assertThat(result.getOwned()).isTrue();
+    }
+
+    @Test
+    @DisplayName("addCard — bumps lastAddedAt so the card surfaces in Récents")
+    void addCard_bumpsLastAddedAt() {
+        when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
+        when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        LocalDateTime before = LocalDateTime.now().minusSeconds(1);
+        collectionService.addCard(10L, 1, 0, false);
+        LocalDateTime after = LocalDateTime.now().plusSeconds(1);
+
+        ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
+        verify(collectionRepository).save(captor.capture());
+
+        assertThat(captor.getValue().getLastAddedAt()).isAfter(before).isBefore(after);
     }
 
     @Test
@@ -207,5 +224,25 @@ class CollectionServiceTest {
 
         assertThat(captor.getValue().getQuantity()).isEqualTo(5);
         assertThat(captor.getValue().getFoil()).isFalse();
+    }
+
+    @Test
+    @DisplayName("updateQuantity — bumps lastAddedAt on an existing, previously-stale entry")
+    void updateQuantity_bumpsLastAddedAt() {
+        UserCollection existing = new UserCollection();
+        existing.setCard(card);
+        existing.setQuantity(1);
+        existing.setLastAddedAt(LocalDateTime.now().minusDays(30));
+        when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
+        when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        LocalDateTime before = LocalDateTime.now().minusSeconds(1);
+        collectionService.updateQuantity(10L, 3, 0, null);
+        LocalDateTime after = LocalDateTime.now().plusSeconds(1);
+
+        ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
+        verify(collectionRepository).save(captor.capture());
+
+        assertThat(captor.getValue().getLastAddedAt()).isAfter(before).isBefore(after);
     }
 }
