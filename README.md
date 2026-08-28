@@ -169,6 +169,9 @@ APP_PORT=8181
 - Chaque carte affiche son numéro de set (ex : `S1·#42`).
 - Le sélecteur de set affiche : **Set 1 — Premier Chapitre**, **Set 2 — L'Ascension des Floodborn**, etc.
 - Filtres disponibles : **Toutes**, **Possédées**, **Manquantes**, **✦ Foil**.
+- Recherche par nom : nécessite au moins **3 caractères** pour filtrer (en dessous, la grille reste inchangée et un indice invite à taper au moins 3 caractères) ; le filtrage se déclenche 300ms après la dernière frappe.
+- Nombre de colonnes affichées adapté à la largeur d'écran, **plafonné à 10 colonnes** sur desktop (les cartes s'agrandissent plutôt que de multiplier les colonnes) ; recalculé en direct si la fenêtre est redimensionnée. Comportement mobile inchangé.
+- Les images ne sont chargées qu'à l'approche de l'écran (au fur et à mesure du défilement), avec un espace réservé le temps du chargement pour éviter tout saut de mise en page.
 
 ### Visualisation de carte
 

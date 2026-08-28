@@ -182,6 +182,7 @@ function handleRoute() {
 
   stopCamera(); // clean up scanner camera if leaving scanner page
   stopSyncPoll(); // stop admin progress polling
+  disconnectCollectionColumnObserver(); // stop column resize tracking if leaving collection page
   renderPage(page);
 }
 
@@ -367,6 +368,47 @@ function renderLogin() {
 
 const collState = { editions: [], edition: null, cards: [], filter: 'all', search: '', modal: null };
 
+// Nombre de colonnes de la grille Collection, plafonné à 10, recalculé au resize.
+let _collResizeObserver = null;
+let _collResizeRaf = null;
+
+function disconnectCollectionColumnObserver() {
+  if (_collResizeObserver) {
+    _collResizeObserver.disconnect();
+    _collResizeObserver = null;
+  }
+  if (_collResizeRaf) {
+    cancelAnimationFrame(_collResizeRaf);
+    _collResizeRaf = null;
+  }
+}
+
+function setupCollectionColumnObserver() {
+  const area = document.getElementById('cardsArea');
+  if (!area) return;
+  disconnectCollectionColumnObserver();
+  const recompute = () => {
+    const cols = Math.max(1, Math.min(10, Math.floor(area.clientWidth / 110)));
+    area.style.setProperty('--cols', cols);
+  };
+  _collResizeObserver = new ResizeObserver(() => {
+    if (_collResizeRaf) cancelAnimationFrame(_collResizeRaf);
+    _collResizeRaf = requestAnimationFrame(recompute);
+  });
+  _collResizeObserver.observe(area);
+  recompute();
+}
+
+let _searchDebounceTimer = null;
+
+function updateSearchHint(trimmedQuery) {
+  const hintEl = document.getElementById('searchHint');
+  if (!hintEl) return;
+  hintEl.textContent = (trimmedQuery.length > 0 && trimmedQuery.length < 3)
+    ? 'Tapez au moins 3 caractères pour rechercher.'
+    : '';
+}
+
 function renderCollection() {
   document.getElementById('app').innerHTML = `
     <div class="app">
@@ -384,6 +426,7 @@ function renderCollection() {
         <div class="search-bar">
           <input class="search-input" id="searchInput" placeholder="Rechercher une carte…" value="${esc(collState.search)}" />
         </div>
+        <div id="searchHint" style="font-size:.72rem;color:var(--text-muted);padding:0 12px 6px"></div>
         <div id="cardsArea">${loadingHTML()}</div>
       </div>
       ${navHTML('collection')}
@@ -402,8 +445,13 @@ function renderCollection() {
   document.getElementById('addManualBtn').addEventListener('click', openAddManualModal);
 
   document.getElementById('searchInput').addEventListener('input', e => {
-    collState.search = e.target.value;
-    renderCards();
+    const value = e.target.value;
+    updateSearchHint(value.trim());
+    clearTimeout(_searchDebounceTimer);
+    _searchDebounceTimer = setTimeout(() => {
+      collState.search = value;
+      renderCards();
+    }, 300);
   });
 
   if (collState.editions.length === 0) {
@@ -417,6 +465,7 @@ function renderCollection() {
     renderEditionBar();
     loadCards();
   }
+  setupCollectionColumnObserver();
 }
 
 function renderEditionBar() {
@@ -468,11 +517,13 @@ const RARITY_COLORS = {
 
 function renderCards() {
   const { cards, filter, search } = collState;
+  const trimmedSearch = search.trim();
+  const searchActive = trimmedSearch.length >= 3;
   const filtered = cards.filter(c => {
     if (filter === 'owned' && !c.owned) return false;
     if (filter === 'missing' && c.owned) return false;
     if (filter === 'foil' && !(c.foilQuantity > 0)) return false;
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (searchActive && !c.name.toLowerCase().includes(trimmedSearch.toLowerCase())) return false;
     return true;
   });
 
@@ -501,6 +552,28 @@ function renderCards() {
       toggleWantedInGrid(parseInt(el.dataset.id));
     });
   });
+  area.querySelectorAll('.card-img-lazy').forEach(img => {
+    img.addEventListener('load', () => img.classList.remove('card-img-lazy'), { once: true });
+    getLazyImageObserver().observe(img);
+  });
+}
+
+// Observateur partagé : ne charge une image de la grille Collection qu'à l'approche du viewport.
+let _lazyImageObserver = null;
+function getLazyImageObserver() {
+  if (_lazyImageObserver) return _lazyImageObserver;
+  _lazyImageObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const img = entry.target;
+      if (img.dataset.src) {
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+      }
+      observer.unobserve(img);
+    });
+  }, { rootMargin: '100% 0px' });
+  return _lazyImageObserver;
 }
 
 async function toggleWantedInGrid(cardId) {
@@ -519,7 +592,7 @@ function cardItemHTML(card) {
   const showWanted = card.wanted && !card.owned;
   return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}${showWanted ? ' wanted' : ''}" data-id="${card.id}">
     ${card.imageUrl
-      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      ? `<img data-src="${esc(card.imageUrl)}" alt="${esc(card.name)}" class="card-img-lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
     ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
     ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : `<button class="wanted-toggle${card.wanted ? ' active' : ''}" data-id="${card.id}" title="Marquer comme voulue">${card.wanted ? '⭐' : '☆'}</button>`}

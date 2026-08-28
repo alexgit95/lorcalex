@@ -79,6 +79,11 @@ body {
   padding: 12px;
 }
 
+/* Collection page grid only: adaptive column cap (max 10), driven by JS via --cols. */
+#cardsArea .cards-grid {
+  grid-template-columns: repeat(var(--cols, 3), 1fr);
+}
+
 /* Card item */
 .card-item {
   background: var(--bg-card);
@@ -107,6 +112,11 @@ body {
   aspect-ratio: 600/840;
   object-fit: cover;
   display: block;
+  background: var(--bg-card2);
+}
+
+/* Collection grid only: skeleton shown until the lazily-loaded image finishes loading. */
+.card-img-lazy {
   background: var(--bg-card2);
 }
 

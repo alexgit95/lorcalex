@@ -7,7 +7,7 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
-## [Unreleased]
+## [2.9.5]
 
 ### Added
 
@@ -16,6 +16,7 @@ et ce projet respecte la Versioning Sémantique.
 ### Changed
 
 - Onglet Stats : les graphiques "Cartes par rareté" par édition sont remplacés par un tableau "Manquantes par édition" affichant, par édition suivie, le nombre de cartes manquantes ventilé par couleur d'encre et par rareté (icônes officielles, sous-total par couleur, colonne Total), plus compact que N graphiques.
+- Onglet Collection : la grille de cartes est plafonnée à 10 colonnes sur desktop (adaptatif, recalculé au redimensionnement, comportement mobile inchangé), les images ne sont chargées qu'à l'approche du viewport (avec espace réservé, sans saut de mise en page), et la recherche par nom nécessite désormais 3 caractères minimum avec un délai de 300ms après la dernière frappe, pour améliorer la réactivité sur les éditions à forte densité de cartes.
 
 ### Fixed
 
