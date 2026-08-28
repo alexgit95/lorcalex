@@ -3,7 +3,9 @@ package com.alexgit95.controller;
 import com.alexgit95.model.ApiKey;
 import com.alexgit95.repository.ApiKeyRepository;
 import com.alexgit95.repository.CardRepository;
+import com.alexgit95.repository.CollectionValueSnapshotRepository;
 import com.alexgit95.repository.EditionRepository;
+import com.alexgit95.repository.EditionValueSnapshotRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.ApiKeyService;
 import tools.jackson.core.type.TypeReference;
@@ -41,6 +43,8 @@ class ImportExportCompatibilityIntegrationTest {
     @Autowired private UserCollectionRepository collectionRepository;
     @Autowired private ApiKeyService apiKeyService;
     @Autowired private ApiKeyRepository apiKeyRepository;
+    @Autowired private CollectionValueSnapshotRepository collectionValueSnapshotRepository;
+    @Autowired private EditionValueSnapshotRepository editionValueSnapshotRepository;
 
     @BeforeEach
     void clean() {
@@ -48,6 +52,8 @@ class ImportExportCompatibilityIntegrationTest {
         cardRepository.deleteAllInBatch();
         editionRepository.deleteAllInBatch();
         apiKeyRepository.deleteAllInBatch();
+        collectionValueSnapshotRepository.deleteAllInBatch();
+        editionValueSnapshotRepository.deleteAllInBatch();
     }
 
     @Test
@@ -65,6 +71,9 @@ class ImportExportCompatibilityIntegrationTest {
         assertThat(editionRepository.count()).isEqualTo(1);
         assertThat(cardRepository.count()).isEqualTo(1);
         assertThat(collectionRepository.count()).isEqualTo(1);
+        assertThat(cardRepository.findByExternalId("compat-ext-1").orElseThrow().getWanted()).isTrue();
+        assertThat(collectionValueSnapshotRepository.count()).isEqualTo(1);
+        assertThat(editionValueSnapshotRepository.count()).isEqualTo(1);
     }
 
     @Test
@@ -81,6 +90,9 @@ class ImportExportCompatibilityIntegrationTest {
 
         assertThat(editionRepository.count()).isEqualTo(11);
         assertThat(cardRepository.count()).isEqualTo(2500);
+        assertThat(cardRepository.findAll()).allMatch(c -> Boolean.FALSE.equals(c.getWanted()));
+        assertThat(collectionValueSnapshotRepository.count()).isEqualTo(0);
+        assertThat(editionValueSnapshotRepository.count()).isEqualTo(0);
     }
 
     @Test

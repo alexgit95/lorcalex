@@ -225,9 +225,14 @@ Exporte et restaure **l'intégralité de l'application** (catalogue + collection
 | Clé JSON | Contenu |
 |----------|---------|
 | `editions` | Tous les sets (code, nom, numéro, date de sortie, URL logo) |
-| `cards` | Catalogue complet (tous les champs, dont `externalId` et `imageHash`) |
+| `cards` | Catalogue complet (tous les champs, dont `externalId`, `imageHash` et `wanted`) |
 | `collection` | Quantités possédées par carte (`quantity`, `foilQuantity`, `foil`, dates) |
 | `settings` | Paramètres applicatifs (dont `stats_enabled_sets`) |
+| `valueHistory` | Historique de valeur : `collectionSnapshots` (valorisation totale de la collection dans le temps) et `editionSnapshots` (valorisation par édition dans le temps) |
+
+Non inclus, volontairement : les clés API d'export et les identifiants administrateur (données sensibles/propres à chaque serveur).
+
+Les champs `wanted` et `valueHistory` sont rétrocompatibles : une sauvegarde antérieure à leur introduction s'importe normalement, avec `wanted` réinitialisé à `false` et aucun historique de valeur restauré.
 
 ### Format du fichier
 

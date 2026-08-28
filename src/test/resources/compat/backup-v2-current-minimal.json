@@ -37,7 +37,8 @@
       "priceCurrency": "EUR",
       "priceSource": "rapidapi-lorcana-prices",
       "lastPriceAt": "2026-08-25T09:30:00",
-      "lastPriceStatus": "SUCCESS"
+      "lastPriceStatus": "SUCCESS",
+      "wanted": true
     }
   ],
   "collection": [
@@ -58,5 +59,24 @@
       "value": "1",
       "description": "Compat fixture"
     }
-  ]
+  ],
+  "valueHistory": {
+    "collectionSnapshots": [
+      {
+        "recordedAt": "2026-08-25T02:00:00",
+        "totalCollectionValueEur": 12.34,
+        "currency": "EUR",
+        "source": "PRICING_SYNC"
+      }
+    ],
+    "editionSnapshots": [
+      {
+        "recordedAt": "2026-08-25T02:00:00",
+        "editionId": 1,
+        "editionCode": "TFC",
+        "editionName": "Premier Chapitre",
+        "totalValueEur": 12.34
+      }
+    ]
+  }
 }

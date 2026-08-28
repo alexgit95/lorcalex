@@ -9,6 +9,10 @@ et ce projet respecte la Versioning Sémantique.
 
 ## [Unreleased]
 
+### Fixed
+
+- Sauvegarde & Restauration complètes : le marqueur "carte voulue" (`wanted`) et l'historique de valeur (collection et par édition) sont désormais inclus dans la sauvegarde et restaurés correctement (l'historique par édition est remappé vers les nouveaux identifiants d'édition). Les sauvegardes antérieures à ce correctif restent importables : `wanted` est réinitialisé à `false` et aucun historique de valeur n'est restauré pour ces anciens fichiers.
+
 ### Changed
 
 - Onglet Collection : les images affichées dans la grille utilisent désormais la miniature (au lieu de l'image pleine résolution), avec repli automatique sur l'image pleine résolution si aucune miniature n'est disponible ; la vue détail continue d'afficher l'image pleine résolution. Les réponses de listage de cartes (grille, recherche) n'incluent plus le texte de règles (`bodyText`/`flavorText`), réduisant la taille des réponses API ; la récupération d'une carte unique par id conserve ce texte.

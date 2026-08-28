@@ -2,11 +2,15 @@ package com.alexgit95.controller;
 
 import com.alexgit95.model.AppSettings;
 import com.alexgit95.model.Card;
+import com.alexgit95.model.CollectionValueSnapshot;
 import com.alexgit95.model.Edition;
+import com.alexgit95.model.EditionValueSnapshot;
 import com.alexgit95.model.UserCollection;
 import com.alexgit95.repository.AppSettingsRepository;
 import com.alexgit95.repository.CardRepository;
+import com.alexgit95.repository.CollectionValueSnapshotRepository;
 import com.alexgit95.repository.EditionRepository;
+import com.alexgit95.repository.EditionValueSnapshotRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.LorcaJsonService;
 import com.alexgit95.service.PricingScheduleService;
@@ -37,6 +41,8 @@ public class AdminController {
     private final EditionRepository editionRepository;
     private final PricingSyncService pricingSyncService;
     private final PricingScheduleService pricingScheduleService;
+    private final CollectionValueSnapshotRepository collectionValueSnapshotRepository;
+    private final EditionValueSnapshotRepository editionValueSnapshotRepository;
 
     public AdminController(AppSettingsRepository settingsRepository,
                            LorcaJsonService lorcaJsonService,
@@ -44,7 +50,9 @@ public class AdminController {
                            CardRepository cardRepository,
                            EditionRepository editionRepository,
                            PricingSyncService pricingSyncService,
-                           PricingScheduleService pricingScheduleService) {
+                           PricingScheduleService pricingScheduleService,
+                           CollectionValueSnapshotRepository collectionValueSnapshotRepository,
+                           EditionValueSnapshotRepository editionValueSnapshotRepository) {
         this.settingsRepository = settingsRepository;
         this.lorcaJsonService = lorcaJsonService;
         this.userCollectionRepository = userCollectionRepository;
@@ -52,6 +60,8 @@ public class AdminController {
         this.editionRepository = editionRepository;
         this.pricingSyncService = pricingSyncService;
         this.pricingScheduleService = pricingScheduleService;
+        this.collectionValueSnapshotRepository = collectionValueSnapshotRepository;
+        this.editionValueSnapshotRepository = editionValueSnapshotRepository;
     }
 
     @GetMapping("/settings")
@@ -232,6 +242,7 @@ public class AdminController {
                     m.put("priceSource", c.getPriceSource());
                     m.put("lastPriceAt", c.getLastPriceAt() != null ? c.getLastPriceAt().toString() : null);
                     m.put("lastPriceStatus", c.getLastPriceStatus());
+                    m.put("wanted", Boolean.TRUE.equals(c.getWanted()));
                     return m;
                 }).collect(Collectors.toList());
 
@@ -258,6 +269,31 @@ public class AdminController {
                     return m;
                 }).collect(Collectors.toList());
 
+        List<Map<String, Object>> collectionSnapshotsData = collectionValueSnapshotRepository.findAll().stream()
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("recordedAt", s.getRecordedAt() != null ? s.getRecordedAt().toString() : null);
+                    m.put("totalCollectionValueEur", s.getTotalCollectionValueEur());
+                    m.put("currency", s.getCurrency());
+                    m.put("source", s.getSource());
+                    return m;
+                }).collect(Collectors.toList());
+
+        List<Map<String, Object>> editionSnapshotsData = editionValueSnapshotRepository.findAll().stream()
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("recordedAt", s.getRecordedAt() != null ? s.getRecordedAt().toString() : null);
+                    m.put("editionId", s.getEditionId());
+                    m.put("editionCode", s.getEditionCode());
+                    m.put("editionName", s.getEditionName());
+                    m.put("totalValueEur", s.getTotalValueEur());
+                    return m;
+                }).collect(Collectors.toList());
+
+        Map<String, Object> valueHistory = new LinkedHashMap<>();
+        valueHistory.put("collectionSnapshots", collectionSnapshotsData);
+        valueHistory.put("editionSnapshots", editionSnapshotsData);
+
         Map<String, Object> backup = new LinkedHashMap<>();
         backup.put("backupDate", LocalDateTime.now().toString());
         backup.put("version", "2");
@@ -268,6 +304,7 @@ public class AdminController {
         backup.put("cards", cardsData);
         backup.put("collection", collectionData);
         backup.put("settings", settingsData);
+        backup.put("valueHistory", valueHistory);
 
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"lorcalex-backup.json\"")
@@ -282,12 +319,19 @@ public class AdminController {
         List<Map<String, Object>> cardsRaw       = (List<Map<String, Object>>) body.getOrDefault("cards",    List.of());
         List<Map<String, Object>> collectionRaw  = (List<Map<String, Object>>) body.getOrDefault("collection", List.of());
         List<Map<String, Object>> settingsRaw    = (List<Map<String, Object>>) body.getOrDefault("settings", List.of());
+        Map<String, Object> valueHistoryRaw = (Map<String, Object>) body.getOrDefault("valueHistory", Map.of());
+        List<Map<String, Object>> collectionSnapshotsRaw =
+                (List<Map<String, Object>>) valueHistoryRaw.getOrDefault("collectionSnapshots", List.of());
+        List<Map<String, Object>> editionSnapshotsRaw =
+                (List<Map<String, Object>>) valueHistoryRaw.getOrDefault("editionSnapshots", List.of());
 
         // 1. Supprimer dans l'ordre des dépendances
         userCollectionRepository.deleteAllInBatch();
         cardRepository.deleteAllInBatch();
         editionRepository.deleteAllInBatch();
         settingsRepository.deleteAllInBatch();
+        collectionValueSnapshotRepository.deleteAllInBatch();
+        editionValueSnapshotRepository.deleteAllInBatch();
 
         // 2. Restaurer les éditions — conserver le mapping ancien ID → nouvelle Edition
         Map<Long, Edition> oldIdToNewEdition = new LinkedHashMap<>();
@@ -337,6 +381,7 @@ public class AdminController {
             card.setPriceSource((String) c.get("priceSource"));
             card.setLastPriceAt(toLocalDateTime(c.get("lastPriceAt")));
             card.setLastPriceStatus((String) c.get("lastPriceStatus"));
+            card.setWanted(c.get("wanted") instanceof Boolean b && b);
             card = cardRepository.save(card);
             if (card.getExternalId() != null) cardByExternalId.put(card.getExternalId(), card);
             if (card.getCardNumber() != null && edCode != null)
@@ -391,6 +436,29 @@ public class AdminController {
                         .collect(Collectors.joining(","));
             }
             settingsRepository.save(new AppSettings(key, value, (String) s.get("description")));
+        }
+
+        // 6. Restaurer l'historique de valeur (curseur collection tel quel, éditions remappées vers les nouveaux ids)
+        for (Map<String, Object> s : collectionSnapshotsRaw) {
+            CollectionValueSnapshot snap = new CollectionValueSnapshot();
+            snap.setRecordedAt(toLocalDateTime(s.get("recordedAt")));
+            snap.setTotalCollectionValueEur(toBigDecimal(s.get("totalCollectionValueEur")));
+            if (s.get("currency") != null) snap.setCurrency((String) s.get("currency"));
+            if (s.get("source") != null) snap.setSource((String) s.get("source"));
+            collectionValueSnapshotRepository.save(snap);
+        }
+        for (Map<String, Object> s : editionSnapshotsRaw) {
+            Object rawEditionId = s.get("editionId");
+            if (!(rawEditionId instanceof Number)) continue;
+            Edition newEdition = oldIdToNewEdition.get(((Number) rawEditionId).longValue());
+            if (newEdition == null) continue;
+            EditionValueSnapshot snap = new EditionValueSnapshot();
+            snap.setRecordedAt(toLocalDateTime(s.get("recordedAt")));
+            snap.setEditionId(newEdition.getId());
+            snap.setEditionCode((String) s.get("editionCode"));
+            snap.setEditionName((String) s.get("editionName"));
+            snap.setTotalValueEur(toBigDecimal(s.get("totalValueEur")));
+            editionValueSnapshotRepository.save(snap);
         }
 
         return ResponseEntity.ok(Map.of(

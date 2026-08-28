@@ -27,13 +27,17 @@ class ImportExportCompatibilityUnitTest {
         assertThat(payload.get("version")).isEqualTo("2");
         assertThat(payload.keySet()).contains(
                 "backupDate", "version", "totalEditions", "totalCards", "totalCollection",
-                "editions", "cards", "collection", "settings");
+                "editions", "cards", "collection", "settings", "valueHistory");
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> cards = (List<Map<String, Object>>) payload.get("cards");
         assertThat(cards).hasSize(1);
         assertThat(cards.get(0)).containsKeys(
-            "marketPrice", "priceCurrency", "priceSource", "lastPriceAt", "lastPriceStatus");
+            "marketPrice", "priceCurrency", "priceSource", "lastPriceAt", "lastPriceStatus", "wanted");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> valueHistory = (Map<String, Object>) payload.get("valueHistory");
+        assertThat(valueHistory).containsKeys("collectionSnapshots", "editionSnapshots");
     }
 
     @Test
