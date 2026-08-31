@@ -11,8 +11,31 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class PricingControllerTest {
+
+    @Test
+    void deleteTrendPoint_returnsNoContentAndDelegatesToService() {
+        CollectionValueTrendService trendService = mock(CollectionValueTrendService.class);
+        PricingController controller = new PricingController(mock(PricingInsightsService.class), trendService);
+
+        ResponseEntity<Void> response = controller.deleteTrendPoint(42L);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(trendService).deleteSnapshot(42L);
+    }
+
+    @Test
+    void deleteTrendPoint_propagatesNotFoundFromService() {
+        CollectionValueTrendService trendService = mock(CollectionValueTrendService.class);
+        doThrow(new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Trend point introuvable"))
+                .when(trendService).deleteSnapshot(999L);
+        PricingController controller = new PricingController(mock(PricingInsightsService.class), trendService);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.deleteTrendPoint(999L))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
 
     @Test
     void recomputeValue_returnsMessageAndRootCauseOnFailure() {

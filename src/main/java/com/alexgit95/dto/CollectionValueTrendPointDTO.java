@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 
 @Data
 public class CollectionValueTrendPointDTO {
+    private Long id;
     private LocalDateTime recordedAt;
     private BigDecimal totalCollectionValueEur;
 }

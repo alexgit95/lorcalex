@@ -45,6 +45,12 @@ public class PricingController {
         return ResponseEntity.ok(collectionValueTrendService.getTrend());
     }
 
+    @DeleteMapping("/trend/{snapshotId}")
+    public ResponseEntity<Void> deleteTrendPoint(@PathVariable Long snapshotId) {
+        collectionValueTrendService.deleteSnapshot(snapshotId);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/edition-deltas")
     public ResponseEntity<List<EditionDeltaDTO>> getEditionDeltas() {
         return ResponseEntity.ok(collectionValueTrendService.getEditionDeltas());

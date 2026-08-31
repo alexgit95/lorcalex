@@ -12,4 +12,6 @@ public interface EditionValueSnapshotRepository extends JpaRepository<EditionVal
 
     List<EditionValueSnapshot> findByEditionIdAndRecordedAtBetweenOrderByRecordedAtAsc(
             Long editionId, LocalDateTime from, LocalDateTime to);
+
+    void deleteByRecordedAt(LocalDateTime recordedAt);
 }

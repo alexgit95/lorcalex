@@ -49,6 +49,7 @@ public class CollectionValueTrendService {
                 .stream()
                 .map(snapshot -> {
                     CollectionValueTrendPointDTO point = new CollectionValueTrendPointDTO();
+                    point.setId(snapshot.getId());
                     point.setRecordedAt(snapshot.getRecordedAt());
                     point.setTotalCollectionValueEur(snapshot.getTotalCollectionValueEur());
                     return point;
@@ -58,6 +59,15 @@ public class CollectionValueTrendService {
         CollectionValueTrendDTO dto = new CollectionValueTrendDTO();
         dto.setTrend(points);
         return dto;
+    }
+
+    @Transactional
+    public void deleteSnapshot(Long snapshotId) {
+        CollectionValueSnapshot snapshot = collectionValueSnapshotRepository.findById(snapshotId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Trend point introuvable"));
+        collectionValueSnapshotRepository.delete(snapshot);
+        editionValueSnapshotRepository.deleteByRecordedAt(snapshot.getRecordedAt());
     }
 
     public List<EditionDeltaDTO> getEditionDeltas() {

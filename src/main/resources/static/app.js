@@ -77,6 +77,7 @@ const api = {
   getPricingInsights: () => apiFetch('/pricing/insights'),
   removeCardPrice: (cardId) => apiFetch(`/pricing/cards/${cardId}/price`, { method: 'DELETE' }),
   getTrend: () => apiFetch('/pricing/trend'),
+  deleteTrendPoint: (snapshotId) => apiFetch(`/pricing/trend/${snapshotId}`, { method: 'DELETE' }),
   getEditionDeltas: () => apiFetch('/pricing/edition-deltas'),
   recomputeValue: () => apiFetch('/pricing/recompute-value', { method: 'POST' }),
 
@@ -741,6 +742,10 @@ function loadPricingData() {
       <div class="chart-container" style="margin:10px 0 16px">
         <h3>Évolution de la valeur totale de la collection</h3>
         <div style="height:220px"><canvas id="collectionTrendChart"></canvas></div>
+        <details id="collectionTrendHistory" style="margin-top:10px">
+          <summary style="cursor:pointer;color:var(--text-muted);font-size:.82rem">Historique détaillé</summary>
+          <div id="collectionTrendHistoryTable" style="margin-top:8px"></div>
+        </details>
       </div>
 
       <div style="padding:0 12px 4px">
@@ -839,6 +844,33 @@ function loadPricingData() {
             },
           },
         },
+      });
+    }
+
+    const historyTableEl = document.getElementById('collectionTrendHistoryTable');
+    if (historyTableEl) {
+      const rows = trendPoints.slice().reverse().map(p => `
+        <div class="edition-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px">
+          <span style="color:var(--text-muted);font-size:.82rem">${esc(new Date(p.recordedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }))}</span>
+          <span style="font-weight:700">${formatEuro(p.totalCollectionValueEur || 0)}</span>
+          <button class="btn btn-ghost" data-trend-point-id="${p.id}" style="padding:2px 8px;font-size:.78rem" title="Supprimer ce point">🗑️</button>
+        </div>`).join('');
+      historyTableEl.innerHTML = rows || `<div class="empty-state" style="padding:12px 8px"><p>Aucun historique disponible.</p></div>`;
+      historyTableEl.querySelectorAll('[data-trend-point-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const snapshotId = btn.dataset.trendPointId;
+          if (!confirm('Supprimer définitivement ce point de la courbe de valeur ? Cette action est irréversible.')) return;
+          btn.disabled = true;
+          api.deleteTrendPoint(snapshotId)
+            .then(() => {
+              showToast('Point supprimé');
+              return loadPricingData();
+            })
+            .catch(err => {
+              showToast(`Échec de la suppression : ${err.message}`, { error: true, duration: 6000 });
+              btn.disabled = false;
+            });
+        });
       });
     }
 

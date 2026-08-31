@@ -413,9 +413,11 @@ Contraintes monétaires:
 
 Après chaque synchronisation pricing réussie, le backend enregistre un snapshot global puis un snapshot par édition. Un snapshot peut aussi être déclenché manuellement depuis l'onglet Prix (voir ci-dessus), sans passer par une synchronisation pricing.
 
-- `GET /api/pricing/trend` renvoie les points de valeur totale de la collection triés chronologiquement.
+- `GET /api/pricing/trend` renvoie les points de valeur totale de la collection triés chronologiquement (chaque point inclut son identifiant de snapshot).
 - `GET /api/pricing/edition-deltas` renvoie pour chaque édition la valeur courante, la valeur de référence à 7 jours et à 30 jours, ainsi que les variations en pourcentage.
 - `POST /api/pricing/recompute-value` recalcule et persiste un nouveau snapshot (global + par édition) à partir des prix actuellement stockés, sans appel au fournisseur de prix.
+- `DELETE /api/pricing/trend/{snapshotId}` supprime définitivement un point de la courbe de valeur totale (utile pour retirer un point aberrant produit par une synchronisation défaillante), ainsi que tous les snapshots par édition enregistrés au même instant. Aucun recalcul compensatoire n'est effectué : les deltas 7j/30j utiliseront simplement le snapshot restant le plus proche du seuil au prochain calcul. Cette suppression est irréversible.
+- Dans l'onglet Prix, un historique détaillé (repliable, masqué par défaut sous le graphique) liste chaque point avec un bouton de suppression, demandant confirmation avant d'agir.
 - Les deltas sont calculés à partir des snapshots historiques les plus récents à ou avant les seuils temporels.
 
 Le modèle de données historique est donc aligné sur la chronologie des synchronisations, ce qui permet de tracer la valeur globale sur le temps et de comparer l'évolution par set.

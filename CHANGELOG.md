@@ -13,6 +13,7 @@ et ce projet respecte la Versioning Sémantique.
 
 - Synchronisation des prix : le seuil du log de débogage `"High market price detected"` (défaut : 5€) est désormais configurable depuis l'onglet Admin (`pricing_log_high_price_threshold`), au lieu d'être fixé en dur dans le code.
 - Synchronisation des prix : nouvelle alerte indépendante `"Abnormal price detected for low rarity card"` (désactivée par défaut) signalant les cartes d'une rarité provider "basse" (`Common,Uncommon,rare,Super_rare` par défaut, personnalisable) dont le prix calculé dépasse un seuil configurable (défaut 5€) — activation, seuil et liste de raretés réglables depuis l'onglet Admin, indépendamment du log "High market price" existant.
+- Onglet Prix : possibilité de supprimer définitivement un point aberrant de la courbe de valeur totale de la collection, via un historique détaillé repliable (masqué par défaut) sous le graphique. La suppression retire aussi les snapshots par édition enregistrés au même instant ; les écarts 7j/30j se recalculent naturellement sur le snapshot restant le plus proche, sans action supplémentaire.
 
 ### Fixed
 

@@ -95,10 +95,39 @@ class CollectionValueTrendServiceTest {
         List<EditionDeltaDTO> deltas = service.getEditionDeltas();
 
         assertThat(trend.getTrend()).hasSize(3);
+        assertThat(trend.getTrend().get(0).getId()).isEqualTo(1L);
         assertThat(trend.getTrend().get(0).getTotalCollectionValueEur()).isEqualByComparingTo("100.00");
         assertThat(trend.getTrend().get(2).getTotalCollectionValueEur()).isEqualByComparingTo("150.00");
         assertThat(deltas).isNotEmpty();
         assertThat(deltas.get(0).getDelta7dPercent()).isEqualByComparingTo("25.00");
         assertThat(deltas.get(0).getDelta30dPercent()).isEqualByComparingTo("50.00");
+    }
+
+    @Test
+    @DisplayName("deleteSnapshot deletes the collection snapshot and all edition snapshots sharing its recordedAt")
+    void deleteSnapshot_deletesCollectionSnapshotAndCorrelatedEditionSnapshots() {
+        LocalDateTime recordedAt = LocalDateTime.now();
+        CollectionValueSnapshot snapshot = new CollectionValueSnapshot();
+        snapshot.setId(5L);
+        snapshot.setRecordedAt(recordedAt);
+        snapshot.setTotalCollectionValueEur(new BigDecimal("200.00"));
+
+        when(collectionValueSnapshotRepository.findById(5L)).thenReturn(java.util.Optional.of(snapshot));
+
+        service.deleteSnapshot(5L);
+
+        org.mockito.Mockito.verify(collectionValueSnapshotRepository).delete(snapshot);
+        org.mockito.Mockito.verify(editionValueSnapshotRepository).deleteByRecordedAt(recordedAt);
+    }
+
+    @Test
+    @DisplayName("deleteSnapshot throws a not-found error for a non-existent snapshot id")
+    void deleteSnapshot_throwsNotFoundForUnknownId() {
+        when(collectionValueSnapshotRepository.findById(999L)).thenReturn(java.util.Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.deleteSnapshot(999L))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+
+        org.mockito.Mockito.verify(editionValueSnapshotRepository, org.mockito.Mockito.never()).deleteByRecordedAt(org.mockito.ArgumentMatchers.any());
     }
 }

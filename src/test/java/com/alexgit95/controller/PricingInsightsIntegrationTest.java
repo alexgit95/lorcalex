@@ -248,6 +248,52 @@ class PricingInsightsIntegrationTest {
         assertThat(editionValueSnapshotRepository.findByEditionIdOrderByRecordedAtAsc(edition.getId())).hasSize(1);
     }
 
+    @Test
+    @WithMockUser
+    @DisplayName("deleting a trend point removes it and its correlated edition snapshots, edition deltas fall back to another reference")
+    void deleteTrendPoint_removesCorrelatedSnapshotsAndFallsBackDeltaReference() throws Exception {
+        Edition edition = saveEdition("TFC", "Premier Chapitre", 1);
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+
+        saveGlobalSnapshot(now.minusDays(30), "100.00");
+        saveGlobalSnapshot(now.minusDays(7), "120.00");
+        saveGlobalSnapshot(now, "150.00");
+        saveEditionSnapshot(edition, now.minusDays(30), "100.00");
+        saveEditionSnapshot(edition, now.minusDays(7), "120.00");
+        saveEditionSnapshot(edition, now, "150.00");
+
+        String trendJson = mockMvc.perform(get("/api/pricing/trend"))
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> trendPayload = objectMapper.readValue(trendJson, new TypeReference<>() {});
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trend = (List<Map<String, Object>>) trendPayload.get("trend");
+        Number sevenDayPointId = (Number) trend.get(1).get("id");
+
+        mockMvc.perform(delete("/api/pricing/trend/" + sevenDayPointId))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/pricing/trend"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.trend.length()").value(2));
+
+        assertThat(collectionValueSnapshotRepository.findAllByOrderByRecordedAtAsc()).hasSize(2);
+        assertThat(editionValueSnapshotRepository.findByEditionIdOrderByRecordedAtAsc(edition.getId())).hasSize(2);
+
+        // With the 7-day reference gone, the 7-day delta falls back to the 30-day snapshot instead.
+        mockMvc.perform(get("/api/pricing/edition-deltas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].value7dEur").value(100.0))
+                .andExpect(jsonPath("$[0].value30dEur").value(100.0));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("deleting an unknown trend point returns not found")
+    void deleteTrendPoint_unknownIdReturnsNotFound() throws Exception {
+        mockMvc.perform(delete("/api/pricing/trend/999999"))
+                .andExpect(status().isNotFound());
+    }
+
     private void saveGlobalSnapshot(LocalDateTime recordedAt, String value) {
         CollectionValueSnapshot snapshot = new CollectionValueSnapshot();
         snapshot.setRecordedAt(recordedAt);
