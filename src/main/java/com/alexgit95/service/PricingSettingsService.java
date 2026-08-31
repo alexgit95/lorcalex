@@ -35,6 +35,10 @@ public class PricingSettingsService {
     public static final String KEY_CURSOR_EPISODE_CARDS_PAGE = "pricing_cursor_episode_cards_page";
     public static final String KEY_LAST_STOP_REASON = "pricing_last_stop_reason";
     public static final String KEY_LOG_HIGH_PRICE_ENABLED = "pricing_log_high_price_enabled";
+    public static final String KEY_LOG_HIGH_PRICE_THRESHOLD = "pricing_log_high_price_threshold";
+    public static final String KEY_LOG_ABNORMAL_PRICE_ENABLED = "pricing_log_abnormal_price_enabled";
+    public static final String KEY_LOG_ABNORMAL_PRICE_THRESHOLD = "pricing_log_abnormal_price_threshold";
+    public static final String KEY_LOG_ABNORMAL_PRICE_RARITIES = "pricing_log_abnormal_price_rarities";
     public static final String KEY_LOG_UNRESOLVED_MAPPING_ENABLED = "pricing_log_unresolved_mapping_enabled";
 
     private static final int MAX_HARD_LIMIT = 100;
@@ -52,6 +56,30 @@ public class PricingSettingsService {
 
     public synchronized boolean isHighPriceLogEnabled() {
         return parseBoolean(getValueOrDefault(KEY_LOG_HIGH_PRICE_ENABLED, "true"), true);
+    }
+
+    public synchronized int getHighPriceLogThreshold() {
+        return Math.max(0, parseInt(getValueOrDefault(KEY_LOG_HIGH_PRICE_THRESHOLD, "5"), 5));
+    }
+
+    public synchronized boolean isAbnormalPriceLogEnabled() {
+        return parseBoolean(getValueOrDefault(KEY_LOG_ABNORMAL_PRICE_ENABLED, "false"), false);
+    }
+
+    public synchronized int getAbnormalPriceLogThreshold() {
+        return Math.max(0, parseInt(getValueOrDefault(KEY_LOG_ABNORMAL_PRICE_THRESHOLD, "5"), 5));
+    }
+
+    public synchronized java.util.Set<String> getAbnormalPriceLogRarities() {
+        String raw = getValueOrDefault(KEY_LOG_ABNORMAL_PRICE_RARITIES, "Common,Uncommon,rare,Super_rare");
+        java.util.Set<String> rarities = new java.util.LinkedHashSet<>();
+        for (String token : raw.split(",")) {
+            String normalized = token.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!normalized.isEmpty()) {
+                rarities.add(normalized);
+            }
+        }
+        return rarities;
     }
 
     public synchronized boolean isUnresolvedMappingLogEnabled() {

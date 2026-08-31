@@ -92,6 +92,50 @@ class PricingSettingsServiceTest {
     }
 
     @Test
+    @DisplayName("getHighPriceLogThreshold defaults to 5, honors explicit value, and clamps negative values to 0")
+    void getHighPriceLogThreshold_defaultsAndClamps() {
+        assertThat(service.getHighPriceLogThreshold()).isEqualTo(5);
+
+        put(PricingSettingsService.KEY_LOG_HIGH_PRICE_THRESHOLD, "20");
+        assertThat(service.getHighPriceLogThreshold()).isEqualTo(20);
+
+        put(PricingSettingsService.KEY_LOG_HIGH_PRICE_THRESHOLD, "-3");
+        assertThat(service.getHighPriceLogThreshold()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("isAbnormalPriceLogEnabled defaults to false and honors explicit setting")
+    void isAbnormalPriceLogEnabled_defaultsFalseAndRespectsSetting() {
+        assertThat(service.isAbnormalPriceLogEnabled()).isFalse();
+
+        put(PricingSettingsService.KEY_LOG_ABNORMAL_PRICE_ENABLED, "true");
+        assertThat(service.isAbnormalPriceLogEnabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("getAbnormalPriceLogThreshold defaults to 5, honors explicit value, and clamps negative values to 0")
+    void getAbnormalPriceLogThreshold_defaultsAndClamps() {
+        assertThat(service.getAbnormalPriceLogThreshold()).isEqualTo(5);
+
+        put(PricingSettingsService.KEY_LOG_ABNORMAL_PRICE_THRESHOLD, "12");
+        assertThat(service.getAbnormalPriceLogThreshold()).isEqualTo(12);
+
+        put(PricingSettingsService.KEY_LOG_ABNORMAL_PRICE_THRESHOLD, "-1");
+        assertThat(service.getAbnormalPriceLogThreshold()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("getAbnormalPriceLogRarities defaults to the base rarities and parses custom CSV, trimmed and lowercased")
+    void getAbnormalPriceLogRarities_defaultsAndParsesCsv() {
+        assertThat(service.getAbnormalPriceLogRarities())
+                .containsExactlyInAnyOrder("common", "uncommon", "rare", "super_rare");
+
+        put(PricingSettingsService.KEY_LOG_ABNORMAL_PRICE_RARITIES, " Common,  , RARE ,Legendary");
+        assertThat(service.getAbnormalPriceLogRarities())
+                .containsExactlyInAnyOrder("common", "rare", "legendary");
+    }
+
+    @Test
     @DisplayName("isUnresolvedMappingLogEnabled defaults to false and honors explicit setting")
     void isUnresolvedMappingLogEnabled_defaultsFalseAndRespectsSetting() {
         assertThat(service.isUnresolvedMappingLogEnabled()).isFalse();

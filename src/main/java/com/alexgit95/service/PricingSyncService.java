@@ -22,7 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class PricingSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(PricingSyncService.class);
-    private static final java.math.BigDecimal HIGH_PRICE_LOG_THRESHOLD = java.math.BigDecimal.valueOf(5);
     private static final List<String> CARDMARKET_CANDIDATE_KEYS = List.of(
             "7d_average", "30d_average", "lowest_near_mint_FR", "lowest_near_mint_FR_EU_only", "lowest_near_mint"
     );
@@ -484,6 +483,10 @@ public class PricingSyncService {
         List<String> mappingSamples = new ArrayList<>();
         List<String> priceSamples = new ArrayList<>();
         for (Map<String, Object> row : rows) {
+            if (isPromoRarityRow(row)) {
+                // Promo cards are never imported into the local catalog; skip before mapping and telemetry.
+                continue;
+            }
             Optional<Card> maybeCard = resolveCard(row, episodeSetNumber);
             if (maybeCard.isEmpty()) {
                 unresolved++;
@@ -523,9 +526,20 @@ public class PricingSyncService {
             cardRepository.save(card);
             statusCounts.merge("SUCCESS", 1, Integer::sum);
             updated++;
-            if (pricingSettingsService.isHighPriceLogEnabled() && row.price.compareTo(HIGH_PRICE_LOG_THRESHOLD) > 0) {
+            java.math.BigDecimal highPriceThreshold = java.math.BigDecimal.valueOf(pricingSettingsService.getHighPriceLogThreshold());
+            if (pricingSettingsService.isHighPriceLogEnabled() && row.price.compareTo(highPriceThreshold) > 0) {
                 log.info("High market price detected (cardId={}, externalId={}, price={}, providerRow={})",
                         card.getId(), card.getExternalId(), row.price, row.rawRow);
+            }
+            if (pricingSettingsService.isAbnormalPriceLogEnabled()) {
+                String rowRarity = normalizeText(row.rawRow.get("rarity"));
+                java.math.BigDecimal abnormalPriceThreshold = java.math.BigDecimal.valueOf(pricingSettingsService.getAbnormalPriceLogThreshold());
+                if (rowRarity != null
+                        && pricingSettingsService.getAbnormalPriceLogRarities().contains(rowRarity.toLowerCase(java.util.Locale.ROOT))
+                        && row.price.compareTo(abnormalPriceThreshold) > 0) {
+                    log.info("Abnormal price detected for low rarity card (cardId={}, externalId={}, rarity={}, computedPrice={}, providerRow={})",
+                            card.getId(), card.getExternalId(), rowRarity, row.price, row.rawRow);
+                }
             }
         }
         return new MappingBatchResult(updated, unresolved, mappingSamples, priceSamples);
@@ -693,6 +707,11 @@ public class PricingSyncService {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static boolean isPromoRarityRow(Map<String, Object> row) {
+        String rarity = normalizeText(row.get("rarity"));
+        return rarity != null && "Promo".equalsIgnoreCase(rarity);
     }
 
     private static Object firstPresent(Map<?, ?> map, String... keys) {

@@ -360,6 +360,8 @@ Le moteur de synchronisation parcourt désormais des endpoints paginés provider
 
 Le mapping provider -> carte locale est déterministe : code d'édition + numéro de carte en priorité, puis fallback contrôlé sur `externalId`.
 
+Les lignes provider dont la `rarity` vaut `Promo` (insensible à la casse) sont ignorées avant toute tentative de mapping : ces cartes ne sont jamais importées dans le catalogue local, donc elles ne peuvent jamais être résolues. Elles ne comptent dans aucun compteur du rapport de synchronisation (`resolvedMappings`, `unresolvedMappings`, `statusCounts`, etc.), n'apparaissent pas dans les échantillons `mappingSamples`/`priceSamples`, et ne déclenchent aucun log diagnostic (même avec `pricing_log_unresolved_mapping_enabled` activé).
+
 ### Extraction du prix provider
 
 Pour chaque ligne provider, le prix est recherché dans cet ordre, uniquement si le conteneur indique `currency: EUR` (comparaison insensible à la casse) :
@@ -443,7 +445,11 @@ Les clés de configuration pricing sont stockées dans `app_settings` et modifia
 - `pricing_cursor_episode_cards_page`
 - `pricing_last_stop_reason`
 - `pricing_log_high_price_enabled` : active/désactive le log `"High market price detected"` (défaut : `true`, comportement historique inchangé).
-- `pricing_log_unresolved_mapping_enabled` : active/désactive un log de diagnostic (une ligne par carte) pour chaque carte en `UNRESOLVED_MAPPING`, incluant le payload provider brut et les critères de recherche testés (défaut : `false`, à activer ponctuellement pour déboguer). Ce log n'affecte pas les échantillons `mappingSamples` (toujours plafonnés à 3) renvoyés dans les rapports de synchronisation. Ces deux réglages sont modifiables depuis l'onglet Admin, section "Synchronisation des prix".
+- `pricing_log_high_price_threshold` : montant (EUR, entier) à partir duquel le log `"High market price detected"` se déclenche pour une carte (défaut : `5`, strictement supérieur — un prix égal au seuil ne déclenche pas le log ; pas de borne haute, une valeur négative est ramenée à `0`).
+- `pricing_log_unresolved_mapping_enabled` : active/désactive un log de diagnostic (une ligne par carte) pour chaque carte en `UNRESOLVED_MAPPING`, incluant le payload provider brut et les critères de recherche testés (défaut : `false`, à activer ponctuellement pour déboguer). Ce log n'affecte pas les échantillons `mappingSamples` (toujours plafonnés à 3) renvoyés dans les rapports de synchronisation.
+- `pricing_log_abnormal_price_enabled` : active/désactive une alerte indépendante `"Abnormal price detected for low rarity card"` déclenchée quand une carte d'une rarité "basse" (voir `pricing_log_abnormal_price_rarities`) dépasse le seuil configuré (défaut : `false`, opt-in). Ce log est totalement indépendant de `pricing_log_high_price_enabled` : les deux peuvent se déclencher simultanément pour la même carte sans interaction entre eux.
+- `pricing_log_abnormal_price_threshold` : montant (EUR, entier) à partir duquel l'alerte de prix anormal se déclenche (défaut : `5`, strictement supérieur, pas de borne haute, valeur négative ramenée à `0`).
+- `pricing_log_abnormal_price_rarities` : liste de raretés provider (valeur brute du champ `rarity` renvoyé par l'API, pas la rareté locale en français) surveillées par l'alerte, séparées par des virgules, comparées insensible à la casse (défaut : `Common,Uncommon,rare,Super_rare`). Ces cinq réglages sont modifiables depuis l'onglet Admin, section "Synchronisation des prix".
 
 ### Import / Export et restauration
 

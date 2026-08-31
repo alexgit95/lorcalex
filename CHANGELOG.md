@@ -9,9 +9,15 @@ et ce projet respecte la Versioning Sémantique.
 
 ## [Unreleased]
 
+### Added
+
+- Synchronisation des prix : le seuil du log de débogage `"High market price detected"` (défaut : 5€) est désormais configurable depuis l'onglet Admin (`pricing_log_high_price_threshold`), au lieu d'être fixé en dur dans le code.
+- Synchronisation des prix : nouvelle alerte indépendante `"Abnormal price detected for low rarity card"` (désactivée par défaut) signalant les cartes d'une rarité provider "basse" (`Common,Uncommon,rare,Super_rare` par défaut, personnalisable) dont le prix calculé dépasse un seuil configurable (défaut 5€) — activation, seuil et liste de raretés réglables depuis l'onglet Admin, indépendamment du log "High market price" existant.
+
 ### Fixed
 
 - Sauvegarde & Restauration complètes : le marqueur "carte voulue" (`wanted`) et l'historique de valeur (collection et par édition) sont désormais inclus dans la sauvegarde et restaurés correctement (l'historique par édition est remappé vers les nouveaux identifiants d'édition). Les sauvegardes antérieures à ce correctif restent importables : `wanted` est réinitialisé à `false` et aucun historique de valeur n'est restauré pour ces anciens fichiers.
+- Synchronisation des prix : les lignes provider correspondant à des cartes promo (`rarity: Promo`) sont désormais ignorées avant toute tentative de mapping, au lieu d'être comptées comme non résolues (`UNRESOLVED_MAPPING`) ; elles ne polluent plus les compteurs du rapport de synchronisation ni les logs de diagnostic.
 
 ### Changed
 

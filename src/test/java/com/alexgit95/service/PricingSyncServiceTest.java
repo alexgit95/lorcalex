@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -163,6 +164,7 @@ class PricingSyncServiceTest {
         mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
         mockQueueCounts(1L, 0L);
         when(pricingSettingsService.isHighPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getHighPriceLogThreshold()).thenReturn(10);
 
         when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
             List.of(Map.of("id", 1L)),
@@ -209,6 +211,219 @@ class PricingSyncServiceTest {
     }
 
     @Test
+    @DisplayName("High market price log uses the configured threshold instead of the previous hardcoded 5 EUR")
+    void runSync_highPriceLog_usesConfiguredThreshold() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isHighPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getHighPriceLogThreshold()).thenReturn(1);
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        // Price is below the previous hardcoded default (5) but above the configured threshold (1).
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(row("TFC", 1, "2.00")),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().contains("High market price detected"));
+    }
+
+    @Test
+    @DisplayName("High market price log comparison stays strict: a price equal to the threshold does not log")
+    void runSync_highPriceLog_strictComparisonAtThreshold() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isHighPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getHighPriceLogThreshold()).thenReturn(5);
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(row("TFC", 1, "5.00")),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("High market price detected"));
+    }
+
+    @Test
+    @DisplayName("Abnormal price alert fires for a matching low-rarity row above the configured threshold")
+    void runSync_abnormalPriceLog_firesForLowRarityAboveThreshold() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isAbnormalPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getAbnormalPriceLogThreshold()).thenReturn(5);
+        when(pricingSettingsService.getAbnormalPriceLogRarities()).thenReturn(Set.of("common", "uncommon", "rare", "super_rare"));
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        Map<String, Object> lowRarityRow = row("TFC", 1, "9.00");
+        lowRarityRow.put("rarity", "Common");
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(lowRarityRow),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().contains("Abnormal price detected for low rarity card"));
+    }
+
+    @Test
+    @DisplayName("Abnormal price alert is suppressed when disabled")
+    void runSync_abnormalPriceLog_suppressedWhenDisabled() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isAbnormalPriceLogEnabled()).thenReturn(false);
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        Map<String, Object> lowRarityRow = row("TFC", 1, "9.00");
+        lowRarityRow.put("rarity", "Common");
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(lowRarityRow),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("Abnormal price detected"));
+    }
+
+    @Test
+    @DisplayName("Abnormal price alert does not fire for a rarity outside the configured list")
+    void runSync_abnormalPriceLog_doesNotFireForRarityOutsideList() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isAbnormalPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getAbnormalPriceLogThreshold()).thenReturn(5);
+        when(pricingSettingsService.getAbnormalPriceLogRarities()).thenReturn(Set.of("common", "uncommon", "rare", "super_rare"));
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        Map<String, Object> enchantedRow = row("TFC", 1, "999.00");
+        enchantedRow.put("rarity", "Enchanted");
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(enchantedRow),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("Abnormal price detected"));
+    }
+
+    @Test
+    @DisplayName("Abnormal price alert does not fire at or below the configured threshold")
+    void runSync_abnormalPriceLog_doesNotFireAtThreshold() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isAbnormalPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getAbnormalPriceLogThreshold()).thenReturn(5);
+        when(pricingSettingsService.getAbnormalPriceLogRarities()).thenReturn(Set.of("common", "uncommon", "rare", "super_rare"));
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        Map<String, Object> lowRarityRow = row("TFC", 1, "5.00");
+        lowRarityRow.put("rarity", "Common");
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(lowRarityRow),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("Abnormal price detected"));
+    }
+
+    @Test
+    @DisplayName("Abnormal price alert and high market price log fire independently when both conditions are met")
+    void runSync_abnormalPriceLog_firesIndependentlyOfHighPriceLog() {
+        Card mapped = card("mapped", null);
+        mapped.setMarketPrice(null);
+
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+        when(pricingSettingsService.isHighPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getHighPriceLogThreshold()).thenReturn(5);
+        when(pricingSettingsService.isAbnormalPriceLogEnabled()).thenReturn(true);
+        when(pricingSettingsService.getAbnormalPriceLogThreshold()).thenReturn(5);
+        when(pricingSettingsService.getAbnormalPriceLogRarities()).thenReturn(Set.of("common", "uncommon", "rare", "super_rare"));
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(Map.of("id", 1L)),
+            new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        Map<String, Object> lowRarityRow = row("TFC", 1, "9.00");
+        lowRarityRow.put("rarity", "Common");
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+            List.of(lowRarityRow),
+            new PricingProviderClient.Paging(1, 1, 100)
+        ));
+        when(cardRepository.findByEditionCodeAndCardNumber("TFC", 1)).thenReturn(java.util.Optional.of(mapped));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().contains("High market price detected"));
+        assertThat(appender.list).anyMatch(e -> e.getFormattedMessage().contains("Abnormal price detected for low rarity card"));
+    }
+
+    @Test
     @DisplayName("Unresolved mapping diagnostic is logged once per unresolved row when enabled, not capped at 3")
     void runSync_unresolvedMappingLog_emittedPerRowWhenEnabled() {
         when(pricingSettingsService.isUnresolvedMappingLogEnabled()).thenReturn(true);
@@ -243,6 +458,61 @@ class PricingSyncServiceTest {
         @SuppressWarnings("unchecked")
         List<String> mappingSamples = (List<String>) report.get("mappingSamples");
         assertThat(mappingSamples).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("Promo rarity rows are skipped before mapping and leave no trace in the manual import report")
+    void applyManualPricingImport_ignoresPromoRarityRows() {
+        when(pricingSettingsService.isUnresolvedMappingLogEnabled()).thenReturn(true);
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        Map<String, Object> report = pricingSyncService.applyManualPricingImport(
+                "[{\"rarity\": \"Promo\"}, {\"rarity\": \"promo\"}, {}]");
+        detachLogAppender(appender);
+
+        // Only the trailing "{}" row (no rarity at all) counts as unresolved; both promo rows are ignored.
+        assertThat(report.get("unresolvedCount")).isEqualTo(1);
+        long unresolvedLogLines = appender.list.stream()
+                .filter(e -> e.getFormattedMessage().contains("Unresolved mapping"))
+                .count();
+        assertThat(unresolvedLogLines).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        List<String> mappingSamples = (List<String>) report.get("mappingSamples");
+        assertThat(mappingSamples).hasSize(1);
+        verify(cardRepository, never()).save(any(Card.class));
+    }
+
+    @Test
+    @DisplayName("runSync skips promo rarity rows without touching statusCounts, resolved/unresolved counters, or saving cards")
+    void runSync_promoRarityRow_leavesNoTraceInReport() {
+        mockEnabledSyncWithBudget(1, 0, new boolean[]{true}, new boolean[]{true});
+        mockQueueCounts(1L, 0L);
+
+        when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 1L)),
+                new PricingProviderClient.Paging(1, 1, 1)
+        ));
+        Map<String, Object> promoRow = row("TFC", 1, "5.00");
+        promoRow.put("rarity", "PROMO");
+        when(pricingProviderClient.fetchEpisodeCardsPage(1L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(promoRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+        ));
+
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        Map<String, Object> report = pricingSyncService.runSync("manual", null);
+        detachLogAppender(appender);
+
+        assertThat(report.get("resolvedMappings")).isEqualTo(0);
+        assertThat(report.get("unresolvedMappings")).isEqualTo(0);
+        assertThat(report.get("unresolvedCount")).isEqualTo(0);
+        assertThat(report.get("successCount")).isEqualTo(0);
+        @SuppressWarnings("unchecked")
+        Map<String, Integer> statusCounts = (Map<String, Integer>) report.get("statusCounts");
+        assertThat(statusCounts).doesNotContainKey("UNRESOLVED_MAPPING");
+        assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("Unresolved mapping"));
+        verify(cardRepository, never()).save(any(Card.class));
+        verify(cardRepository, never()).findByEditionCodeAndCardNumber(any(), any());
     }
 
     private static ListAppender<ILoggingEvent> attachLogAppender() {

@@ -2235,7 +2235,11 @@ function renderAdmin() {
     };
     const pricingSyncEnabled = settingVal('pricing_sync_enabled', 'true');
     const pricingLogHighPriceEnabled = settingVal('pricing_log_high_price_enabled', 'true');
+    const pricingLogHighPriceThreshold = settingVal('pricing_log_high_price_threshold', '5');
     const pricingLogUnresolvedMappingEnabled = settingVal('pricing_log_unresolved_mapping_enabled', 'false');
+    const pricingLogAbnormalPriceEnabled = settingVal('pricing_log_abnormal_price_enabled', 'false');
+    const pricingLogAbnormalPriceThreshold = settingVal('pricing_log_abnormal_price_threshold', '5');
+    const pricingLogAbnormalPriceRarities = settingVal('pricing_log_abnormal_price_rarities', 'Common,Uncommon,rare,Super_rare');
     const pricingDailyHardLimit = settingVal('pricing_daily_hard_limit', settingVal('pricing_daily_budget', '100'));
     const pricingDailySafetyMargin = settingVal('pricing_daily_safety_margin', '5');
     const pricingMinuteLimit = settingVal('pricing_minute_limit', '30');
@@ -2315,11 +2319,42 @@ function renderAdmin() {
             </select>
           </label>
           <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Seuil "High market price" (EUR)</span>
+            <input id="pricingLogHighPriceThreshold" type="number" min="0" value="${esc(pricingLogHighPriceThreshold)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
             <span style="display:block;margin-bottom:4px">Log diagnostic "Unresolved mapping"</span>
             <select id="pricingLogUnresolvedMappingEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
               <option value="true" ${pricingLogUnresolvedMappingEnabled === 'true' ? 'selected' : ''}>Oui</option>
               <option value="false" ${pricingLogUnresolvedMappingEnabled === 'false' ? 'selected' : ''}>Non</option>
             </select>
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Alerte "Prix anormal" (rareté basse)</span>
+            <select id="pricingLogAbnormalPriceEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingLogAbnormalPriceEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingLogAbnormalPriceEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Seuil "Prix anormal" (EUR)</span>
+            <input id="pricingLogAbnormalPriceThreshold" type="number" min="0" value="${esc(pricingLogAbnormalPriceThreshold)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Raretés surveillées (séparées par virgule)</span>
+            <input id="pricingLogAbnormalPriceRarities" type="text" value="${esc(pricingLogAbnormalPriceRarities)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
           </label>
         </div>
 
@@ -2574,7 +2609,11 @@ function renderAdmin() {
     document.getElementById('pricingSaveBtn').addEventListener('click', async () => {
       const syncEnabled = document.getElementById('pricingSyncEnabled').value;
       const logHighPriceEnabled = document.getElementById('pricingLogHighPriceEnabled').value;
+      const logHighPriceThreshold = document.getElementById('pricingLogHighPriceThreshold').value.trim();
       const logUnresolvedMappingEnabled = document.getElementById('pricingLogUnresolvedMappingEnabled').value;
+      const logAbnormalPriceEnabled = document.getElementById('pricingLogAbnormalPriceEnabled').value;
+      const logAbnormalPriceThreshold = document.getElementById('pricingLogAbnormalPriceThreshold').value.trim();
+      const logAbnormalPriceRarities = document.getElementById('pricingLogAbnormalPriceRarities').value.trim();
       const dailyHardLimit = document.getElementById('pricingDailyHardLimit').value.trim();
       const dailySafetyMargin = document.getElementById('pricingDailySafetyMargin').value.trim();
       const minuteLimit = document.getElementById('pricingMinuteLimit').value.trim();
@@ -2589,7 +2628,11 @@ function renderAdmin() {
         await Promise.all([
           api.updateSetting('pricing_sync_enabled', syncEnabled),
           api.updateSetting('pricing_log_high_price_enabled', logHighPriceEnabled),
+          api.updateSetting('pricing_log_high_price_threshold', logHighPriceThreshold || '5'),
           api.updateSetting('pricing_log_unresolved_mapping_enabled', logUnresolvedMappingEnabled),
+          api.updateSetting('pricing_log_abnormal_price_enabled', logAbnormalPriceEnabled),
+          api.updateSetting('pricing_log_abnormal_price_threshold', logAbnormalPriceThreshold || '5'),
+          api.updateSetting('pricing_log_abnormal_price_rarities', logAbnormalPriceRarities || 'Common,Uncommon,rare,Super_rare'),
           api.updateSetting('pricing_daily_hard_limit', dailyHardLimit || '100'),
           api.updateSetting('pricing_daily_budget', dailyHardLimit || '100'),
           api.updateSetting('pricing_daily_safety_margin', dailySafetyMargin || '0'),
