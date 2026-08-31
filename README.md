@@ -375,6 +375,8 @@ Pour chaque ligne provider, le prix est recherché dans cet ordre, uniquement si
 
 Les valeurs nulles sont ignorées, mais `0` est un prix valide. Si aucun de ces six champs n'est exploitable, le prix reste non résolu (`UNRESOLVED_PRICE`) : aucun fallback générique sur d'autres champs du payload n'est appliqué.
 
+Les deux premiers candidats (`7d_average`, `30d_average`) sont en plus soumis à un garde-fou de plausibilité : une médiane de référence est calculée à partir de toutes les valeurs non nulles et non nulles-en-valeur (`0` exclu) parmi les 8 variantes régionales `lowest_near_mint*` (`lowest_near_mint`, `_EU_only`, `_DE`, `_DE_EU_only`, `_FR`, `_FR_EU_only`, `_IT`, `_IT_EU_only`) et les deux moyennes elles-mêmes. Cette médiane n'est calculée que si au moins 5 valeurs sont disponibles ; en dessous de ce seuil, `7d_average`/`30d_average` sont utilisés tels quels (comportement historique). Quand la médiane est calculable, une valeur strictement inférieure au cinquième de la médiane ou strictement supérieure à cinq fois la médiane est considérée comme aberrante et écartée (la borne exacte `médiane × 5` est acceptée) ; le candidat suivant de la liste est alors évalué normalement. Ce garde-fou ne s'applique qu'à `7d_average`/`30d_average` — `lowest_near_mint_FR`, `lowest_near_mint_FR_EU_only`, `lowest_near_mint` et `tcg_player.market_price` restent évalués sans vérification de plausibilité.
+
 ### Exécution
 
 - Tâche planifiée quotidienne basée sur `pricing_schedule_cron` (modifiable en administration, sans redémarrage).

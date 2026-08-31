@@ -760,6 +760,202 @@ class PricingSyncServiceTest {
             }
 
             @Test
+            @DisplayName("runSync rejects an implausible 7d_average relative to the reference median and falls through")
+            void runSync_rejectsImplausible7dAverageAndFallsThrough() {
+            Card localCard = card("ext-implausible-7d", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 180);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint", 0.02,
+                    "lowest_near_mint_EU_only", 0.02,
+                    "lowest_near_mint_DE", 0.02,
+                    "lowest_near_mint_FR", 0.02,
+                    "7d_average", 199.00
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(180, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.02");
+            }
+
+            @Test
+            @DisplayName("runSync rejects implausible 7d_average and 30d_average together and falls through to lowest_near_mint_FR")
+            void runSync_rejectsImplausible7dAnd30dAverageAndFallsThrough() {
+            Card localCard = card("ext-implausible-7d-30d", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 181);
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint", 0.02,
+                    "lowest_near_mint_EU_only", 0.02,
+                    "lowest_near_mint_FR", 0.02,
+                    "7d_average", 199.00,
+                    "30d_average", 198.00
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(181, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("0.02");
+            }
+
+            @Test
+            @DisplayName("runSync does not guard an average when the reference pool has fewer than 5 usable values")
+            void runSync_doesNotGuardAverageWhenPoolBelowMinimumSize() {
+            Card localCard = card("ext-thin-pool", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 182);
+            // Only 3 pooled values (below the 5-value minimum), even though 7d_average is wildly
+            // off relative to the other two — the guard must not apply here.
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint", 0.02,
+                    "lowest_near_mint_FR", 0.03,
+                    "7d_average", 500.00
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(182, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("500.00");
+            }
+
+            @Test
+            @DisplayName("runSync accepts an average exactly at the median x5 boundary")
+            void runSync_acceptsAverageAtExactBoundary() {
+            Card localCard = card("ext-exact-boundary", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 183);
+            // Pool: four lowest_* at 1.00 plus 7d_average itself => median of [1,1,1,1,5] = 1.00,
+            // and 7d_average = 5.00 is exactly median x5 — must be accepted, not rejected.
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint", 1.00,
+                    "lowest_near_mint_EU_only", 1.00,
+                    "lowest_near_mint_DE", 1.00,
+                    "lowest_near_mint_FR", 1.00,
+                    "7d_average", 5.00
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(183, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("5.00");
+            }
+
+            @Test
+            @DisplayName("runSync excludes zero-valued fields from the reference median pool size")
+            void runSync_excludesZeroValuedFieldsFromMedianPoolSize() {
+            Card localCard = card("ext-zero-excluded-from-pool", null);
+
+            mockEnabledSyncWithBudget(2, 2, new boolean[]{true, true, false}, new boolean[]{true, true, false});
+            mockQueueCounts(1L, 0L);
+
+            when(pricingProviderClient.fetchEpisodesPage(1)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(Map.of("id", 401L, "code", "11WSP")),
+                new PricingProviderClient.Paging(1, 1, 1)
+            ));
+
+            Map<String, Object> providerRow = new LinkedHashMap<>();
+            providerRow.put("card_number", 184);
+            // Two zero-valued fields plus 3 real lowest_* plus 7d_average: if zeros counted toward
+            // the pool, size would be 6 (>=5) and the guard would reject 7d_average=199. Since zeros
+            // must be excluded, the real pool is only 4 values (<5), so the guard does not apply and
+            // 7d_average is accepted as-is.
+            providerRow.put("prices", Map.of(
+                "cardmarket", Map.of(
+                    "currency", "EUR",
+                    "lowest_near_mint", 0,
+                    "lowest_near_mint_EU_only", 0,
+                    "lowest_near_mint_DE", 0.02,
+                    "lowest_near_mint_FR", 0.02,
+                    "7d_average", 199.00
+                )
+            ));
+
+            when(pricingProviderClient.fetchEpisodeCardsPage(401L, 1, 100)).thenReturn(PricingProviderClient.PagedResult.success(
+                List.of(providerRow),
+                new PricingProviderClient.Paging(1, 1, 100)
+            ));
+            when(cardRepository.findByCardNumberAndEditionId(184, 11L)).thenReturn(java.util.Optional.of(localCard));
+
+            Map<String, Object> report = pricingSyncService.runSync("manual", null);
+
+            assertThat(report.get("successCount")).isEqualTo(1);
+            assertThat(localCard.getMarketPrice()).isEqualByComparingTo("199.00");
+            }
+
+            @Test
             @DisplayName("runSync prefers cardmarket lowest_near_mint_FR when averages are absent")
             void runSync_prefersCardmarketLowestNearMintFrWhenAveragesMissing() {
             Card localCard = card("ext-near-mint-fr", null);

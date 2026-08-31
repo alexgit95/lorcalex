@@ -25,6 +25,16 @@ public class PricingSyncService {
     private static final List<String> CARDMARKET_CANDIDATE_KEYS = List.of(
             "7d_average", "30d_average", "lowest_near_mint_FR", "lowest_near_mint_FR_EU_only", "lowest_near_mint"
     );
+    private static final List<String> CARDMARKET_AVERAGE_KEYS = List.of("7d_average", "30d_average");
+    private static final List<String> CARDMARKET_MEDIAN_POOL_KEYS = List.of(
+            "lowest_near_mint", "lowest_near_mint_EU_only",
+            "lowest_near_mint_DE", "lowest_near_mint_DE_EU_only",
+            "lowest_near_mint_FR", "lowest_near_mint_FR_EU_only",
+            "lowest_near_mint_IT", "lowest_near_mint_IT_EU_only",
+            "7d_average", "30d_average"
+    );
+    private static final int MEDIAN_POOL_MINIMUM_SIZE = 5;
+    private static final int PLAUSIBILITY_FACTOR = 5;
 
     private final CardRepository cardRepository;
     private final PricingSettingsService pricingSettingsService;
@@ -634,7 +644,9 @@ public class PricingSyncService {
      * Ordered price source priority: cardmarket 7d/30d averages, then FR, FR EU-only, and generic
      * near-mint, then tcg_player market price as last resort. Each container's currency is checked
      * once (all cardmarket-sourced candidates share cardmarket.currency); no further fallback is
-     * attempted if none of the ordered candidates are usable.
+     * attempted if none of the ordered candidates are usable. The two average-based candidates are
+     * additionally rejected as implausible if they fall outside 1/5x-5x of the row's reference median
+     * (only when at least {@link #MEDIAN_POOL_MINIMUM_SIZE} pooled price fields are available).
      */
     private java.math.BigDecimal extractCardmarketPreferredPrice(Map<String, Object> payload) {
         Object pricesNode = payload.get("prices");
@@ -644,11 +656,16 @@ public class PricingSyncService {
 
         Object cardmarketNode = pricesMap.get("cardmarket");
         if (cardmarketNode instanceof Map<?, ?> cardmarketMap && isAcceptableCurrency(cardmarketMap)) {
+            Optional<java.math.BigDecimal> referenceMedian = computeCardmarketReferenceMedian(cardmarketMap);
             for (String key : CARDMARKET_CANDIDATE_KEYS) {
                 java.math.BigDecimal value = extractPriceNode(cardmarketMap.get(key));
-                if (value != null) {
-                    return value;
+                if (value == null) {
+                    continue;
                 }
+                if (CARDMARKET_AVERAGE_KEYS.contains(key) && !isPlausibleAverage(value, referenceMedian)) {
+                    continue;
+                }
+                return value;
             }
         }
 
@@ -658,6 +675,40 @@ public class PricingSyncService {
         }
 
         return null;
+    }
+
+    private Optional<java.math.BigDecimal> computeCardmarketReferenceMedian(Map<?, ?> cardmarketMap) {
+        List<java.math.BigDecimal> pool = new ArrayList<>();
+        for (String key : CARDMARKET_MEDIAN_POOL_KEYS) {
+            java.math.BigDecimal value = extractPriceNode(cardmarketMap.get(key));
+            if (value != null && value.compareTo(java.math.BigDecimal.ZERO) != 0) {
+                pool.add(value);
+            }
+        }
+        if (pool.size() < MEDIAN_POOL_MINIMUM_SIZE) {
+            return Optional.empty();
+        }
+        pool.sort(Comparator.naturalOrder());
+        int size = pool.size();
+        java.math.BigDecimal median;
+        if (size % 2 == 1) {
+            median = pool.get(size / 2);
+        } else {
+            java.math.BigDecimal lower = pool.get(size / 2 - 1);
+            java.math.BigDecimal upper = pool.get(size / 2);
+            median = lower.add(upper).divide(java.math.BigDecimal.valueOf(2), 10, java.math.RoundingMode.HALF_UP);
+        }
+        return Optional.of(median);
+    }
+
+    private static boolean isPlausibleAverage(java.math.BigDecimal value, Optional<java.math.BigDecimal> medianOpt) {
+        if (medianOpt.isEmpty()) {
+            return true;
+        }
+        java.math.BigDecimal median = medianOpt.get();
+        java.math.BigDecimal lowerBound = median.divide(java.math.BigDecimal.valueOf(PLAUSIBILITY_FACTOR), 10, java.math.RoundingMode.HALF_UP);
+        java.math.BigDecimal upperBound = median.multiply(java.math.BigDecimal.valueOf(PLAUSIBILITY_FACTOR));
+        return value.compareTo(lowerBound) >= 0 && value.compareTo(upperBound) <= 0;
     }
 
     private boolean isAcceptableCurrency(Map<?, ?> priceContainerMap) {

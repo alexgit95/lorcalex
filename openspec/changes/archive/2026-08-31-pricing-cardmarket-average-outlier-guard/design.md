@@ -1,0 +1,33 @@
+## Context
+
+`PricingSyncService.extractCardmarketPreferredPrice()` implements a strict ordered cascade (7d_average → 30d_average → lowest_near_mint_FR → lowest_near_mint_FR_EU_only → lowest_near_mint → tcg_player.market_price), each candidate used if present and currency-matched. This cascade was deliberately set 4 days ago (`revise-cardmarket-price-precedence`, 2026-08-27) to prefer recent-transaction averages over near-mint snapshots. In practice, the provider occasionally returns an aberrant `7d_average`/`30d_average` for a row whose `lowest_near_mint*` fields (up to 8 regional variants: `lowest_near_mint`, `_EU_only`, `_DE`, `_DE_EU_only`, `_FR`, `_FR_EU_only`, `_IT`, `_IT_EU_only`) are internally consistent — e.g. `7d_average=199` while every `lowest_*` reads `~0.02`. Because averages are evaluated first, this currently produces a grossly wrong `Card.marketPrice`.
+
+## Goals / Non-Goals
+
+**Goals:**
+- Reject an implausible `7d_average`/`30d_average` before it's used, without changing the cascade order or behavior for rows where all fields are consistent.
+- Use a robust, self-contained reference (median of the row's own price fields) requiring no external/historical data.
+- Preserve current behavior exactly when there isn't enough data on the row to compute a reference.
+
+**Non-Goals:**
+- Not changing the cascade order, nor adding/removing candidates.
+- Not applying any plausibility guard to `lowest_near_mint_FR`, `lowest_near_mint_FR_EU_only`, `lowest_near_mint`, or `tcg_player.market_price` — these remain exactly as they are today (the first three anchor the reference; the last is an unconditional last resort).
+- Not persisting or exposing which candidate/guard outcome was used per card (no new audit field) — out of scope, could be a follow-up.
+- Not changing `RapidApiPricingProviderClient.extractPrice()` (single-card fetch path) — scoped to the bulk provider-row mapping path, consistent with the prior two changes to this exact method.
+
+## Decisions
+
+- **Reference pool = 8 regional `lowest_near_mint*` fields + `7d_average` + `30d_average`, all present (non-null) and non-zero values from `prices.cardmarket`.** A field valued exactly `0` is treated as absent for the purpose of building this pool (excluded), per explicit decision — distinct from the existing "zero is a legitimate final price" rule, which still applies once a candidate is accepted as the final price.
+- **Median computed only if the pool has at least 5 usable values.** If the pool (after excluding null/zero) has fewer than 5 values, no guard is applied — `7d_average`/`30d_average` are evaluated exactly as today (present + currency check only). This was confirmed necessary after discovering that a 3-value pool (e.g. `30d_average=4.44` vs `lowest_near_mint_FR=1.11`, `lowest_near_mint=0.22`) produces an unreliable median that would otherwise reject a legitimate, non-aberrant average (a ~4x spread between a 30-day average and instant near-mint listings is normal, not a data error). Requiring at least 5 values before trusting the median avoids rejecting plausible prices based on too few data points.
+- **Guard applied only to `7d_average` and `30d_average`, in existing cascade order.** For each of these two candidates (evaluated in that order, as today): if present, currency-matched, and the median is computable (pool has at least 5 values), reject the candidate when `value < median / 5` or `value > median * 5`; a rejected candidate falls through to the next candidate in the existing cascade (unchanged fallthrough mechanism). The boundary `value == median * 5` (and symmetrically `value == median / 5`) is accepted, not rejected.
+  - Threshold widened from an initially-considered ×3 to ×5, and a 5-value pool minimum added, after discovering ×3 with no minimum rejected a legitimate real-world case in the existing test suite (see Risks). ×5 with real-world outliers (observed: ~10,000x spread) still rejects them comfortably while tolerating normal 30-day-average vs near-mint-listing divergence.
+- **`tcg_player.market_price` is never guarded.** It's the last candidate in the cascade; if reached, it is accepted as today (present + currency check only), since there is no further fallback to protect by rejecting it.
+- **Implementation shape**: a private helper `computeCardmarketReferenceMedian(cardmarketMap)` returning `Optional<BigDecimal>` (empty if pool is empty), called once per row before the cascade loop; a second private helper `isPlausibleAverage(BigDecimal value, Optional<BigDecimal> median)` used to gate the 7d/30d branches only. `BigDecimal` median is computed by sorting the pool and averaging the two middle elements for even-sized pools (standard median definition), consistent with `HALF_UP` rounding used elsewhere in this method.
+  - Alternative considered — apply the same guard to all 6 candidates uniformly: rejected because `lowest_near_mint_FR`/`lowest_near_mint_FR_EU_only`/`lowest_near_mint` are part of the reference pool itself (guarding them against a median they contribute to is circular and could reject legitimate regional price spread, e.g. Moana's FR=600 vs IT=1800 in real fixture data), and `tcg_player.market_price` has no further fallback to protect.
+
+## Risks / Trade-offs
+
+- [Risk] A row where the *majority* of the pool (half or more of the at-least-5 values) is simultaneously aberrant would still produce a bad median, defeating the guard → accepted trade-off: this would indicate a much more broadly broken provider response than the observed failure mode (one or two average fields off), not addressed by this change.
+- [Risk] Legitimate regional price divergence (e.g. IT consistently 3x FR) could occasionally make `lowest_near_mint` itself an "outlier" relative to the median, but since no guard is applied to `lowest_near_mint*` candidates, this has no effect — they're used as-is if reached, same as today.
+- [Trade-off] Excluding zero-valued fields from the median pool (rather than counting them) means a card genuinely priced at 0 in several regions won't pull the median down; this favors guard accuracy over reflecting genuine zero-price rows in the reference, consistent with the explicit decision to treat 0 as "no data" for this purpose only.
+- [Trade-off] The ×5 threshold with a 5-value minimum pool is deliberately conservative (fewer false rejections of legitimate prices) at the cost of missing some moderate anomalies (e.g. a 4x-6x aberrant value on a thin pool would not be caught) — accepted since the primary reported failure mode is orders of magnitude off (100x+), which this configuration catches reliably.
