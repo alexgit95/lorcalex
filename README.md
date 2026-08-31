@@ -17,6 +17,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 - [Scanner OCR](#scanner-de-cartes-ocr-continu)
 - [Synchronisation des prix](#synchronisation-des-prix-des-cartes)
 - [Sauvegarde & Restauration](#sauvegarde--restauration-complètes)
+- [Export Dreamborn.ink](#export-dreambornink)
 - [Clés API & Export programmable](#clés-api--export-programmable)
 - [Import Lorcana Companion](#import-depuis-lorcana-companion)
 - [API REST](#api-rest)
@@ -34,7 +35,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 | **Scanner** | OCR caméra en continu : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, reprise rapide. |
 | **Derniers scans** | Onglet dédié : N dernières cartes ajoutées avec date/heure. Sélecteur 10 / 20 / 25 / 50. |
 | **Prix** | Valorisation EUR, top des cartes possédées par prix unitaire et suivi de l'évolution de collection. |
-| **Administration** | Sync LorcaJson (URL/fichier), sauvegarde/restauration complètes, import Lorcana Companion, gestion des clés API. |
+| **Administration** | Sync LorcaJson (URL/fichier), sauvegarde/restauration complètes, export Dreamborn.ink, import Lorcana Companion, gestion des clés API. |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion. |
 
 ---
@@ -261,6 +262,26 @@ Cliquer **⬇️ Télécharger la sauvegarde complète** → génère `lorcalex-
 3. La restauration efface tout, recrée dans le bon ordre et remappe automatiquement les IDs d'éditions dans `stats_enabled_sets`.
 
 > **Utilisation typique :** migration vers un nouveau serveur, récupération après réinitialisation de la base.
+
+---
+
+## Export Dreamborn.ink
+
+Accessible depuis **Administration → Export Dreamborn.ink**, cet export télécharge votre collection dans un fichier CSV importable dans Dreamborn.ink.
+
+La case **Conserver un exemplaire en réserve** est activée par défaut. Lorsqu'elle est cochée, Lorcalex retire un exemplaire foil en priorité pour chaque carte ; en l'absence de foil, il retire un exemplaire normal. Décochez-la pour exporter l'intégralité de vos quantités. L'export ne modifie jamais votre collection.
+
+Les cartes sans numéro de set ou numéro de carte ne sont pas exportées. Les variantes normale et foil sont exportées séparément lorsqu'elles ont une quantité positive.
+
+### Format du fichier
+
+```csv
+Set Number,Card Number,Variant,Count
+4,188,normal,2
+1,13,foil,1
+```
+
+L'endpoint administrateur correspondant est `GET /api/admin/export/dreamborn?reserve=true|false`. Le paramètre `reserve` vaut `true` lorsqu'il est absent.
 
 ---
 
@@ -497,6 +518,7 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 | `GET` | `/api/admin/lorcajson-url` | JWT | URL LorcaJson configurée |
 | `POST` | `/api/admin/compute-hashes` | JWT | Calcul d'empreintes visuelles |
 | `GET` | `/api/admin/backup` | JWT | Sauvegarde complète |
+| `GET` | `/api/admin/export/dreamborn?reserve=true|false` | JWT | Export CSV Dreamborn.ink, avec réserve activée par défaut |
 | `POST` | `/api/admin/restore` | JWT | Restauration complète |
 | `POST` | `/api/admin/import/companion?merge=` | JWT | Import Lorcana Companion |
 | `GET` | `/api/admin/apikeys` | JWT | Liste des clés API |

@@ -15,6 +15,7 @@ import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.LorcaJsonService;
 import com.alexgit95.service.PricingScheduleService;
 import com.alexgit95.service.PricingSyncService;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -163,6 +164,52 @@ public class AdminController {
     public ResponseEntity<Map<String, Object>> simulatePricingImport(@RequestBody Map<String, String> body) {
         String json = body != null ? body.get("json") : null;
         return ResponseEntity.ok(pricingSyncService.applyManualPricingImport(json));
+    }
+
+    @GetMapping(value = "/export/dreamborn", produces = "text/csv")
+    public ResponseEntity<String> exportDreamborn(
+            @RequestParam(name = "reserve", defaultValue = "true") boolean reserve) {
+        StringBuilder csv = new StringBuilder("Set Number,Card Number,Variant,Count\n");
+
+        for (UserCollection collection : userCollectionRepository.findAllWithCard()) {
+            Card card = collection.getCard();
+            if (card == null || card.getEdition() == null
+                    || card.getEdition().getSetNumber() == null || card.getCardNumber() == null) {
+                continue;
+            }
+
+            int normalQuantity = Math.max(0, collection.getQuantity() != null ? collection.getQuantity() : 0);
+            int foilQuantity = Math.max(0, collection.getFoilQuantity() != null ? collection.getFoilQuantity() : 0);
+
+            if (reserve) {
+                if (foilQuantity > 0) {
+                    foilQuantity--;
+                } else if (normalQuantity > 0) {
+                    normalQuantity--;
+                }
+            }
+
+            appendDreambornRow(csv, card, "normal", normalQuantity);
+            appendDreambornRow(csv, card, "foil", foilQuantity);
+        }
+
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"lorcalex-dreamborn.csv\"")
+                .body(csv.toString());
+    }
+
+    private static void appendDreambornRow(StringBuilder csv, Card card, String variant, int quantity) {
+        if (quantity > 0) {
+            csv.append(card.getEdition().getSetNumber())
+                    .append(',')
+                    .append(card.getCardNumber())
+                    .append(',')
+                    .append(variant)
+                    .append(',')
+                    .append(quantity)
+                    .append('\n');
+        }
     }
 
     @PostMapping("/import/companion")

@@ -123,6 +123,8 @@ const api = {
 
   fullBackup: () => apiFetch('/admin/backup'),
   fullRestore: (data) => apiFetch('/admin/restore', { method: 'POST', body: JSON.stringify(data) }),
+  exportDreamborn: (reserve) =>
+    apiFetch('/admin/export/dreamborn?reserve=' + encodeURIComponent(String(!!reserve))),
 
   getRecentCards: (limit = 20) => apiFetch('/collection/recent?limit=' + limit),
 
@@ -2491,6 +2493,20 @@ function renderAdmin() {
         <div id="fullBackupResult" style="margin-top:8px"></div>
       </div>
 
+      <!-- Dreamborn Export -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">Export Dreamborn.ink</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Téléchargez votre collection au format CSV pour créer un deck dans Dreamborn.ink.
+        </p>
+        <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--text-muted);margin:0 0 10px;cursor:pointer">
+          <input type="checkbox" id="dreambornReserve" checked style="accent-color:var(--accent)" />
+          Conserver un exemplaire en réserve (foil prioritaire)
+        </label>
+        <button class="btn btn-accent btn-full" id="dreambornExportBtn">⬇️ Télécharger l'export Dreamborn (.csv)</button>
+        <div id="dreambornExportResult" style="margin-top:8px"></div>
+      </div>
+
       <!-- Companion Import -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Import depuis Lorcana Companion</h3>
@@ -2977,6 +2993,27 @@ function renderAdmin() {
         showAdminResult('fullBackupResult', { success: false, message: 'Erreur restauration : ' + err.message });
       } finally {
         e.target.value = '';
+      }
+    });
+
+    // ── Export Dreamborn ─────────────────────────────────────────────────
+    document.getElementById('dreambornExportBtn').addEventListener('click', async () => {
+      const reserve = document.getElementById('dreambornReserve')?.checked !== false;
+      try {
+        const csv = await api.exportDreamborn(reserve);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lorcalex-dreamborn-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showAdminResult('dreambornExportResult', {
+          success: true,
+          message: reserve ? 'Export Dreamborn téléchargé avec réserve.' : 'Export Dreamborn téléchargé sans réserve.'
+        });
+      } catch (err) {
+        showAdminResult('dreambornExportResult', { success: false, message: 'Erreur export Dreamborn : ' + err.message });
       }
     });
 
