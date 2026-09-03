@@ -1,6 +1,8 @@
 package com.alexgit95.service;
 
 import com.alexgit95.dto.EditionStatDTO;
+import com.alexgit95.dto.MissingByColorDTO;
+import com.alexgit95.dto.RarityCountDTO;
 import com.alexgit95.dto.RarityStatDTO;
 import com.alexgit95.dto.StatisticsDTO;
 import com.alexgit95.model.AppSettings;
@@ -13,7 +15,9 @@ import com.alexgit95.repository.UserCollectionRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -42,7 +46,7 @@ public class StatisticsService {
     }
 
     public StatisticsDTO getStatistics() {
-        Set<Long> enabledSetIds = getEnabledSetIds();
+        Set<Long> enabledSetIds = resolveEnabledSetIds();
         List<Edition> editions = editionRepository.findAll().stream()
                 .filter(e -> enabledSetIds == null || enabledSetIds.contains(e.getId()))
                 .collect(Collectors.toList());
@@ -69,7 +73,9 @@ public class StatisticsService {
         long owned = collectionRepository.countByEditionIdAndRarityIn(edition.getId(), RARITIES);
         long missing = total - owned;
 
-        List<RarityStatDTO> byRarity = buildRarityStats(edition, cardRepository.findByEditionOrderByCardNumberAsc(edition));
+        List<Card> cards = cardRepository.findByEditionOrderByCardNumberAsc(edition);
+        List<RarityStatDTO> byRarity = buildRarityStats(edition, cards);
+        List<MissingByColorDTO> missingByColor = buildMissingByColor(edition, cards);
 
         EditionStatDTO dto = new EditionStatDTO();
         dto.setEditionId(edition.getId());
@@ -80,10 +86,11 @@ public class StatisticsService {
         dto.setMissingCards(missing);
         dto.setCompletionPercentage(total > 0 ? (double) owned / total * 100 : 0);
         dto.setByRarity(byRarity);
+        dto.setMissingByColor(missingByColor);
         return dto;
     }
 
-    private Set<Long> getEnabledSetIds() {
+    public Set<Long> resolveEnabledSetIds() {
         // null means no filter configured yet -> all sets enabled by default.
         AppSettings setting = settingsRepository.findBySettingKey(KEY_STATS_ENABLED_SETS).orElse(null);
         if (setting == null) return null;
@@ -118,6 +125,35 @@ public class StatisticsService {
                     return new RarityStatDTO(rarity, total, owned, total - owned);
                 })
                 .filter(dto -> dto != null)
+                .collect(Collectors.toList());
+    }
+
+    private List<MissingByColorDTO> buildMissingByColor(Edition edition, List<Card> cards) {
+        Set<Long> ownedCardIds = collectionRepository.findByEditionId(edition.getId()).stream()
+                .filter(uc -> uc.getQuantity() > 0 || uc.getFoilQuantity() > 0)
+                .map(uc -> uc.getCard().getId())
+                .collect(Collectors.toSet());
+
+        Map<String, Map<String, Long>> missingByColorRarity = new LinkedHashMap<>();
+        for (Card card : cards) {
+            if (!RARITIES.contains(card.getRarity())) continue;
+            if (ownedCardIds.contains(card.getId())) continue;
+            String color = card.getInkColor();
+            if (color == null) continue;
+            missingByColorRarity
+                    .computeIfAbsent(color, k -> new LinkedHashMap<>())
+                    .merge(card.getRarity(), 1L, Long::sum);
+        }
+
+        return missingByColorRarity.entrySet().stream()
+                .map(entry -> {
+                    Map<String, Long> rarityCounts = entry.getValue();
+                    List<RarityCountDTO> byRarity = RARITIES.stream()
+                            .filter(rarityCounts::containsKey)
+                            .map(rarity -> new RarityCountDTO(rarity, rarityCounts.get(rarity)))
+                            .collect(Collectors.toList());
+                    return new MissingByColorDTO(entry.getKey(), byRarity);
+                })
                 .collect(Collectors.toList());
     }
 }

@@ -61,6 +61,14 @@ public class CardController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PatchMapping("/cards/{id}/wanted")
+    public ResponseEntity<CardDTO> setWanted(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        boolean wanted = body.containsKey("wanted") && Boolean.parseBoolean(String.valueOf(body.get("wanted")));
+        return cardService.setWanted(id, wanted)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/cards/lookup")
     public ResponseEntity<List<CardDTO>> lookupCard(
             @RequestParam Integer number,

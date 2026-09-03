@@ -38,7 +38,7 @@ public class CardService {
                 .collect(Collectors.toMap(uc -> uc.getCard().getId(), uc -> uc));
 
         return cards.stream()
-                .map(card -> toDTO(card, ownedMap.get(card.getId())))
+                .map(card -> toDTO(card, ownedMap.get(card.getId()), false))
                 .collect(Collectors.toList());
     }
 
@@ -56,7 +56,7 @@ public class CardService {
                             return (e != null && e.getSetNumber() != null) ? e.getSetNumber() : Integer.MAX_VALUE;
                         })
                         .thenComparingInt(c -> c.getCardNumber() != null ? c.getCardNumber() : Integer.MAX_VALUE))
-                .map(card -> toDTO(card, ownedMap.get(card.getId())))
+                .map(card -> toDTO(card, ownedMap.get(card.getId()), false))
                 .collect(Collectors.toList());
     }
 
@@ -71,7 +71,7 @@ public class CardService {
                         .thenComparingInt(c -> c.getCardNumber() != null ? c.getCardNumber() : Integer.MAX_VALUE))
                 .map(card -> {
                     Optional<UserCollection> uc = collectionRepository.findByCardId(card.getId());
-                    return toDTO(card, uc.orElse(null));
+                    return toDTO(card, uc.orElse(null), false);
                 })
                 .collect(Collectors.toList());
     }
@@ -102,7 +102,21 @@ public class CardService {
                 .toList();
     }
 
+    public Optional<CardDTO> setWanted(Long cardId, boolean wanted) {
+        return cardRepository.findById(cardId)
+                .map(card -> {
+                    card.setWanted(wanted);
+                    cardRepository.save(card);
+                    Optional<UserCollection> uc = collectionRepository.findByCardId(cardId);
+                    return toDTO(card, uc.orElse(null));
+                });
+    }
+
     public CardDTO toDTO(Card card, UserCollection uc) {
+        return toDTO(card, uc, true);
+    }
+
+    public CardDTO toDTO(Card card, UserCollection uc, boolean includeRulesText) {
         CardDTO dto = new CardDTO();
         dto.setId(card.getId());
         dto.setName(card.getName());
@@ -112,20 +126,31 @@ public class CardService {
         dto.setInkColor(card.getInkColor());
         dto.setType(card.getType());
         dto.setSubtypes(card.getSubtypes());
-        dto.setBodyText(card.getBodyText());
-        dto.setFlavorText(card.getFlavorText());
+        if (includeRulesText) {
+            dto.setBodyText(card.getBodyText());
+            dto.setFlavorText(card.getFlavorText());
+        }
         dto.setImageUrl(card.getImageUrl());
+        dto.setThumbnailUrl(card.getThumbnailUrl());
         dto.setArtist(card.getArtist());
         dto.setInkable(card.getInkable());
+        dto.setMarketPrice(card.getMarketPrice());
+        dto.setPriceCurrency(card.getPriceCurrency());
+        dto.setPriceSource(card.getPriceSource());
+        dto.setLastPriceAt(card.getLastPriceAt());
+        dto.setLastPriceStatus(card.getLastPriceStatus());
+        dto.setWanted(Boolean.TRUE.equals(card.getWanted()));
         if (card.getEdition() != null) {
             dto.setEditionId(card.getEdition().getId());
             dto.setEditionName(card.getEdition().getName());
             dto.setEditionCode(card.getEdition().getCode());
             dto.setEditionSetNumber(card.getEdition().getSetNumber());
         }
-        dto.setOwned(uc != null);
-        dto.setQuantity(uc != null ? uc.getQuantity() : 0);
-        dto.setFoilQuantity(uc != null ? uc.getFoilQuantity() : 0);
+        int quantity = uc != null && uc.getQuantity() != null ? uc.getQuantity() : 0;
+        int foilQuantity = uc != null && uc.getFoilQuantity() != null ? uc.getFoilQuantity() : 0;
+        dto.setOwned(quantity > 0 || foilQuantity > 0);
+        dto.setQuantity(quantity);
+        dto.setFoilQuantity(foilQuantity);
         dto.setFoil(uc != null && Boolean.TRUE.equals(uc.getFoil()));
         dto.setFirstAddedAt(uc != null ? uc.getFirstAddedAt() : null);
         dto.setLastAddedAt(uc != null ? uc.getLastAddedAt() : null);

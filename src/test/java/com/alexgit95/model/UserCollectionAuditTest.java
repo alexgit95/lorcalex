@@ -70,11 +70,11 @@ class UserCollectionAuditTest {
         assertThat(saved.getLastAddedAt()).isEqualTo(originalDate.plusDays(1));
     }
 
-    // ─── @PreUpdate ───────────────────────────────────────────────────────────
+    // ─── update behavior (no implicit @PreUpdate) ─────────────────────────────
 
     @Test
-    @DisplayName("@PreUpdate updates lastAddedAt but preserves firstAddedAt")
-    void onUpdate_updatesLastAddedAtAndPreservesFirstAddedAt() throws InterruptedException {
+    @DisplayName("Plain field update does NOT change lastAddedAt unless explicitly set")
+    void onUpdate_doesNotBumpLastAddedAtImplicitly() throws InterruptedException {
         Card card = persistCard();
 
         UserCollection uc = new UserCollection();
@@ -82,15 +82,16 @@ class UserCollectionAuditTest {
         uc.setQuantity(1);
         UserCollection saved = em.persistFlushFind(uc);
         LocalDateTime firstAdded = saved.getFirstAddedAt();
+        LocalDateTime lastAdded = saved.getLastAddedAt();
 
-        // Small delay so timestamps can differ on fast machines
+        // Small delay so a wrongly-bumped timestamp would be detectable
         Thread.sleep(50);
 
         saved.setQuantity(3);
         em.flush();
 
         assertThat(saved.getFirstAddedAt()).isEqualTo(firstAdded);
-        assertThat(saved.getLastAddedAt()).isNotNull().isAfterOrEqualTo(firstAdded);
+        assertThat(saved.getLastAddedAt()).isEqualTo(lastAdded);
     }
 
     // ─── foil ────────────────────────────────────────────────────────────────

@@ -78,6 +78,8 @@ jobs:
           context: .
           push: true
           platforms: linux/arm64
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/lorcalex:${{ steps.branch_tag.outputs.value }}
 
       - name: Build and push – main (tag = latest)
@@ -87,6 +89,8 @@ jobs:
           context: .
           push: true
           platforms: linux/arm64
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/lorcalex:latest
 
       - name: Build and push – git tag (tag = version + latest)
@@ -96,6 +100,8 @@ jobs:
           context: .
           push: true
           platforms: linux/arm64
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/lorcalex:${{ github.ref_name }}
             ${{ secrets.DOCKERHUB_USERNAME }}/lorcalex:latest

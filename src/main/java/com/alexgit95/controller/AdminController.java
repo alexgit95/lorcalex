@@ -2,18 +2,28 @@ package com.alexgit95.controller;
 
 import com.alexgit95.model.AppSettings;
 import com.alexgit95.model.Card;
+import com.alexgit95.model.CollectionValueSnapshot;
 import com.alexgit95.model.Edition;
+import com.alexgit95.model.EditionValueSnapshot;
 import com.alexgit95.model.UserCollection;
 import com.alexgit95.repository.AppSettingsRepository;
 import com.alexgit95.repository.CardRepository;
+import com.alexgit95.repository.CollectionValueSnapshotRepository;
 import com.alexgit95.repository.EditionRepository;
+import com.alexgit95.repository.EditionValueSnapshotRepository;
 import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.LorcaJsonService;
+import com.alexgit95.service.PricingScheduleService;
+import com.alexgit95.service.PricingSyncService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.info.BuildProperties;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -32,22 +42,52 @@ public class AdminController {
     private final UserCollectionRepository userCollectionRepository;
     private final CardRepository cardRepository;
     private final EditionRepository editionRepository;
+    private final PricingSyncService pricingSyncService;
+    private final PricingScheduleService pricingScheduleService;
+    private final CollectionValueSnapshotRepository collectionValueSnapshotRepository;
+    private final EditionValueSnapshotRepository editionValueSnapshotRepository;
+    private final ObjectProvider<BuildProperties> buildPropertiesProvider;
 
     public AdminController(AppSettingsRepository settingsRepository,
                            LorcaJsonService lorcaJsonService,
                            UserCollectionRepository userCollectionRepository,
                            CardRepository cardRepository,
-                           EditionRepository editionRepository) {
+                           EditionRepository editionRepository,
+                           PricingSyncService pricingSyncService,
+                           PricingScheduleService pricingScheduleService,
+                           CollectionValueSnapshotRepository collectionValueSnapshotRepository,
+                           EditionValueSnapshotRepository editionValueSnapshotRepository,
+                           ObjectProvider<BuildProperties> buildPropertiesProvider) {
         this.settingsRepository = settingsRepository;
         this.lorcaJsonService = lorcaJsonService;
         this.userCollectionRepository = userCollectionRepository;
         this.cardRepository = cardRepository;
         this.editionRepository = editionRepository;
+        this.pricingSyncService = pricingSyncService;
+        this.pricingScheduleService = pricingScheduleService;
+        this.collectionValueSnapshotRepository = collectionValueSnapshotRepository;
+        this.editionValueSnapshotRepository = editionValueSnapshotRepository;
+        this.buildPropertiesProvider = buildPropertiesProvider;
     }
 
     @GetMapping("/settings")
     public ResponseEntity<List<AppSettings>> getSettings() {
         return ResponseEntity.ok(settingsRepository.findAll());
+    }
+
+    @GetMapping("/version")
+    public ResponseEntity<Map<String, String>> getBuildIdentity() {
+        BuildProperties buildProperties = buildPropertiesProvider.getIfAvailable();
+        if (buildProperties == null) {
+            return ResponseEntity.ok(Map.of("version", "unknown", "commit", "unknown"));
+        }
+
+        String version = Optional.ofNullable(buildProperties.getVersion()).orElse("unknown");
+        String commit = Optional.ofNullable(buildProperties.get("git.commit"))
+                .filter(value -> !value.isBlank())
+                .map(value -> value.length() > 7 ? value.substring(0, 7) : value)
+                .orElse("unknown");
+        return ResponseEntity.ok(Map.of("version", version, "commit", commit));
     }
 
     @PutMapping("/settings/{key}")
@@ -57,7 +97,9 @@ public class AdminController {
         AppSettings setting = settingsRepository.findBySettingKey(key)
                 .orElse(new AppSettings(key, null, null));
         setting.setSettingValue(body.get("value"));
-        return ResponseEntity.ok(settingsRepository.save(setting));
+        AppSettings saved = settingsRepository.save(setting);
+        pricingScheduleService.onSettingUpdated(key);
+        return ResponseEntity.ok(saved);
     }
 
     @GetMapping("/progress")
@@ -115,6 +157,79 @@ public class AdminController {
     @GetMapping("/lorcajson-url")
     public ResponseEntity<Map<String, Object>> getLorcaJsonUrl() {
         return ResponseEntity.ok(Map.of("url", lorcaJsonService.getLorcaJsonUrl()));
+    }
+
+    @GetMapping("/pricing/status")
+    public ResponseEntity<Map<String, Object>> getPricingStatus() {
+        Map<String, Object> status = new LinkedHashMap<>(pricingSyncService.getStatus());
+        status.putAll(pricingScheduleService.getScheduleStatus());
+        return ResponseEntity.ok(status);
+    }
+
+    @PostMapping("/pricing/run")
+    public ResponseEntity<Map<String, Object>> runPricingSync(
+            @RequestBody(required = false) Map<String, Object> body) {
+        Integer maxAttempts = null;
+        if (body != null && body.get("maxAttempts") instanceof Number n) {
+            maxAttempts = n.intValue();
+        }
+        return ResponseEntity.ok(pricingSyncService.runSync("manual", maxAttempts));
+    }
+
+    /**
+     * Temporary tool: simulate a provider episode-cards API response by applying
+     * pricing from a manually pasted JSON payload, without calling the provider.
+     */
+    @PostMapping("/pricing/simulate-import")
+    public ResponseEntity<Map<String, Object>> simulatePricingImport(@RequestBody Map<String, String> body) {
+        String json = body != null ? body.get("json") : null;
+        return ResponseEntity.ok(pricingSyncService.applyManualPricingImport(json));
+    }
+
+    @GetMapping(value = "/export/dreamborn", produces = "text/csv")
+    public ResponseEntity<String> exportDreamborn(
+            @RequestParam(name = "reserve", defaultValue = "true") boolean reserve) {
+        StringBuilder csv = new StringBuilder("Set Number,Card Number,Variant,Count\n");
+
+        for (UserCollection collection : userCollectionRepository.findAllWithCard()) {
+            Card card = collection.getCard();
+            if (card == null || card.getEdition() == null
+                    || card.getEdition().getSetNumber() == null || card.getCardNumber() == null) {
+                continue;
+            }
+
+            int normalQuantity = Math.max(0, collection.getQuantity() != null ? collection.getQuantity() : 0);
+            int foilQuantity = Math.max(0, collection.getFoilQuantity() != null ? collection.getFoilQuantity() : 0);
+
+            if (reserve) {
+                if (foilQuantity > 0) {
+                    foilQuantity--;
+                } else if (normalQuantity > 0) {
+                    normalQuantity--;
+                }
+            }
+
+            appendDreambornRow(csv, card, "normal", normalQuantity);
+            appendDreambornRow(csv, card, "foil", foilQuantity);
+        }
+
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"lorcalex-dreamborn.csv\"")
+                .body(csv.toString());
+    }
+
+    private static void appendDreambornRow(StringBuilder csv, Card card, String variant, int quantity) {
+        if (quantity > 0) {
+            csv.append(card.getEdition().getSetNumber())
+                    .append(',')
+                    .append(card.getCardNumber())
+                    .append(',')
+                    .append(variant)
+                    .append(',')
+                    .append(quantity)
+                    .append('\n');
+        }
     }
 
     @PostMapping("/import/companion")
@@ -189,6 +304,12 @@ public class AdminController {
                     m.put("artist", c.getArtist());
                     m.put("inkable", c.getInkable());
                     m.put("imageHash", c.getImageHash());
+                    m.put("marketPrice", c.getMarketPrice());
+                    m.put("priceCurrency", c.getPriceCurrency());
+                    m.put("priceSource", c.getPriceSource());
+                    m.put("lastPriceAt", c.getLastPriceAt() != null ? c.getLastPriceAt().toString() : null);
+                    m.put("lastPriceStatus", c.getLastPriceStatus());
+                    m.put("wanted", Boolean.TRUE.equals(c.getWanted()));
                     return m;
                 }).collect(Collectors.toList());
 
@@ -215,6 +336,31 @@ public class AdminController {
                     return m;
                 }).collect(Collectors.toList());
 
+        List<Map<String, Object>> collectionSnapshotsData = collectionValueSnapshotRepository.findAll().stream()
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("recordedAt", s.getRecordedAt() != null ? s.getRecordedAt().toString() : null);
+                    m.put("totalCollectionValueEur", s.getTotalCollectionValueEur());
+                    m.put("currency", s.getCurrency());
+                    m.put("source", s.getSource());
+                    return m;
+                }).collect(Collectors.toList());
+
+        List<Map<String, Object>> editionSnapshotsData = editionValueSnapshotRepository.findAll().stream()
+                .map(s -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("recordedAt", s.getRecordedAt() != null ? s.getRecordedAt().toString() : null);
+                    m.put("editionId", s.getEditionId());
+                    m.put("editionCode", s.getEditionCode());
+                    m.put("editionName", s.getEditionName());
+                    m.put("totalValueEur", s.getTotalValueEur());
+                    return m;
+                }).collect(Collectors.toList());
+
+        Map<String, Object> valueHistory = new LinkedHashMap<>();
+        valueHistory.put("collectionSnapshots", collectionSnapshotsData);
+        valueHistory.put("editionSnapshots", editionSnapshotsData);
+
         Map<String, Object> backup = new LinkedHashMap<>();
         backup.put("backupDate", LocalDateTime.now().toString());
         backup.put("version", "2");
@@ -225,6 +371,7 @@ public class AdminController {
         backup.put("cards", cardsData);
         backup.put("collection", collectionData);
         backup.put("settings", settingsData);
+        backup.put("valueHistory", valueHistory);
 
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"lorcalex-backup.json\"")
@@ -239,12 +386,19 @@ public class AdminController {
         List<Map<String, Object>> cardsRaw       = (List<Map<String, Object>>) body.getOrDefault("cards",    List.of());
         List<Map<String, Object>> collectionRaw  = (List<Map<String, Object>>) body.getOrDefault("collection", List.of());
         List<Map<String, Object>> settingsRaw    = (List<Map<String, Object>>) body.getOrDefault("settings", List.of());
+        Map<String, Object> valueHistoryRaw = (Map<String, Object>) body.getOrDefault("valueHistory", Map.of());
+        List<Map<String, Object>> collectionSnapshotsRaw =
+                (List<Map<String, Object>>) valueHistoryRaw.getOrDefault("collectionSnapshots", List.of());
+        List<Map<String, Object>> editionSnapshotsRaw =
+                (List<Map<String, Object>>) valueHistoryRaw.getOrDefault("editionSnapshots", List.of());
 
         // 1. Supprimer dans l'ordre des dépendances
         userCollectionRepository.deleteAllInBatch();
         cardRepository.deleteAllInBatch();
         editionRepository.deleteAllInBatch();
         settingsRepository.deleteAllInBatch();
+        collectionValueSnapshotRepository.deleteAllInBatch();
+        editionValueSnapshotRepository.deleteAllInBatch();
 
         // 2. Restaurer les éditions — conserver le mapping ancien ID → nouvelle Edition
         Map<Long, Edition> oldIdToNewEdition = new LinkedHashMap<>();
@@ -289,6 +443,12 @@ public class AdminController {
             card.setArtist((String) c.get("artist"));
             if (c.get("inkable")   != null) card.setInkable((Boolean) c.get("inkable"));
             if (c.get("imageHash") != null) card.setImageHash(((Number) c.get("imageHash")).longValue());
+            card.setMarketPrice(toBigDecimal(c.get("marketPrice")));
+            card.setPriceCurrency((String) c.get("priceCurrency"));
+            card.setPriceSource((String) c.get("priceSource"));
+            card.setLastPriceAt(toLocalDateTime(c.get("lastPriceAt")));
+            card.setLastPriceStatus((String) c.get("lastPriceStatus"));
+            card.setWanted(c.get("wanted") instanceof Boolean b && b);
             card = cardRepository.save(card);
             if (card.getExternalId() != null) cardByExternalId.put(card.getExternalId(), card);
             if (card.getCardNumber() != null && edCode != null)
@@ -345,11 +505,65 @@ public class AdminController {
             settingsRepository.save(new AppSettings(key, value, (String) s.get("description")));
         }
 
+        // 6. Restaurer l'historique de valeur (curseur collection tel quel, éditions remappées vers les nouveaux ids)
+        for (Map<String, Object> s : collectionSnapshotsRaw) {
+            CollectionValueSnapshot snap = new CollectionValueSnapshot();
+            snap.setRecordedAt(toLocalDateTime(s.get("recordedAt")));
+            snap.setTotalCollectionValueEur(toBigDecimal(s.get("totalCollectionValueEur")));
+            if (s.get("currency") != null) snap.setCurrency((String) s.get("currency"));
+            if (s.get("source") != null) snap.setSource((String) s.get("source"));
+            collectionValueSnapshotRepository.save(snap);
+        }
+        for (Map<String, Object> s : editionSnapshotsRaw) {
+            Object rawEditionId = s.get("editionId");
+            if (!(rawEditionId instanceof Number)) continue;
+            Edition newEdition = oldIdToNewEdition.get(((Number) rawEditionId).longValue());
+            if (newEdition == null) continue;
+            EditionValueSnapshot snap = new EditionValueSnapshot();
+            snap.setRecordedAt(toLocalDateTime(s.get("recordedAt")));
+            snap.setEditionId(newEdition.getId());
+            snap.setEditionCode((String) s.get("editionCode"));
+            snap.setEditionName((String) s.get("editionName"));
+            snap.setTotalValueEur(toBigDecimal(s.get("totalValueEur")));
+            editionValueSnapshotRepository.save(snap);
+        }
+
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", editionsRaw.size() + " édition(s), " + cardsRaw.size() + " carte(s), "
                         + collectionRestored + " entrée(s) de collection, "
                         + settingsRaw.size() + " paramètre(s) restaurés."
         ));
+    }
+
+    private static BigDecimal toBigDecimal(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        if (value instanceof Number number) {
+            return BigDecimal.valueOf(number.doubleValue());
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return new BigDecimal(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static LocalDateTime toLocalDateTime(Object value) {
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return LocalDateTime.parse(text);
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 }

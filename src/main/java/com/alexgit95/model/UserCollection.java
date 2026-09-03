@@ -39,9 +39,4 @@ public class UserCollection {
         if (firstAddedAt == null) firstAddedAt = LocalDateTime.now();
         if (lastAddedAt == null)  lastAddedAt  = LocalDateTime.now();
     }
-
-    @PreUpdate
-    protected void onUpdate() {
-        lastAddedAt = LocalDateTime.now();
-    }
 }

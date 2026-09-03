@@ -5,6 +5,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 
 ---
 
+
 ## Table des matières
 
 - [Fonctionnalités](#fonctionnalités)
@@ -14,7 +15,9 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 - [Import du catalogue](#import-du-catalogue-lorcajson)
 - [Collection](#collection--tri-et-affichage)
 - [Scanner OCR](#scanner-de-cartes-ocr-continu)
+- [Synchronisation des prix](#synchronisation-des-prix-des-cartes)
 - [Sauvegarde & Restauration](#sauvegarde--restauration-complètes)
+- [Export Dreamborn.ink](#export-dreambornink)
 - [Clés API & Export programmable](#clés-api--export-programmable)
 - [Import Lorcana Companion](#import-depuis-lorcana-companion)
 - [API REST](#api-rest)
@@ -31,7 +34,8 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 | **Statistiques** | Graphiques Chart.js (donut, barres empilées) : progression globale, par set, par rareté. |
 | **Scanner** | OCR caméra en continu : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, reprise rapide. |
 | **Derniers scans** | Onglet dédié : N dernières cartes ajoutées avec date/heure. Sélecteur 10 / 20 / 25 / 50. |
-| **Administration** | Sync LorcaJson (URL/fichier), sauvegarde/restauration complètes, import Lorcana Companion, gestion des clés API. |
+| **Prix** | Valorisation EUR, top des cartes possédées par prix unitaire et suivi de l'évolution de collection. |
+| **Administration** | Sync LorcaJson (URL/fichier), sauvegarde/restauration complètes, export Dreamborn.ink, import Lorcana Companion, gestion des clés API. |
 | **Se souvenir de moi** | Option à la connexion pour 12 mois d'authentification sans reconnexion. |
 
 ---
@@ -122,6 +126,16 @@ docker compose up --build
 # → http://localhost:8181
 ```
 
+### Identité du build
+
+L'en-tête de la page **Administration** affiche la version de l'application et le SHA Git court de l'artefact déployé, au format `version - SHA court` (par exemple `2.9.5 - 6808cac`).
+
+Les images publiées par GitHub Actions reçoivent automatiquement le SHA du commit source pendant leur build. Un build local qui ne fournit pas l'argument Docker `GIT_COMMIT` affiche `version - unknown`; ce comportement indique explicitement que la révision source n'a pas été intégrée à l'artefact.
+
+```bash
+docker build --build-arg GIT_COMMIT="$(git rev-parse HEAD)" -t lorcalex .
+```
+
 ### Portainer — Stack
 
 1. Dans Portainer → **Stacks → Add stack**.
@@ -166,6 +180,9 @@ APP_PORT=8181
 - Chaque carte affiche son numéro de set (ex : `S1·#42`).
 - Le sélecteur de set affiche : **Set 1 — Premier Chapitre**, **Set 2 — L'Ascension des Floodborn**, etc.
 - Filtres disponibles : **Toutes**, **Possédées**, **Manquantes**, **✦ Foil**.
+- Recherche par nom : nécessite au moins **3 caractères** pour filtrer (en dessous, la grille reste inchangée et un indice invite à taper au moins 3 caractères) ; le filtrage se déclenche 300ms après la dernière frappe.
+- Nombre de colonnes affichées adapté à la largeur d'écran, **plafonné à 10 colonnes** sur desktop (les cartes s'agrandissent plutôt que de multiplier les colonnes) ; recalculé en direct si la fenêtre est redimensionnée. Comportement mobile inchangé.
+- Les images ne sont chargées qu'à l'approche de l'écran (au fur et à mesure du défilement), avec un espace réservé le temps du chargement pour éviter tout saut de mise en page.
 
 ### Visualisation de carte
 
@@ -173,6 +190,7 @@ Cliquer sur une carte ouvre un écran détail avec :
 
 - Grande image plein-écran
 - Set + numéro + nom + rareté
+- Prix de marché et date de dernière mise à jour, lorsqu'ils sont disponibles
 - Compteurs **Regular** et **Foil** modifiables indépendamment (boutons + / −)
 - Dates de premier ajout et de dernière modification
 
@@ -218,9 +236,14 @@ Exporte et restaure **l'intégralité de l'application** (catalogue + collection
 | Clé JSON | Contenu |
 |----------|---------|
 | `editions` | Tous les sets (code, nom, numéro, date de sortie, URL logo) |
-| `cards` | Catalogue complet (tous les champs, dont `externalId` et `imageHash`) |
+| `cards` | Catalogue complet (tous les champs, dont `externalId`, `imageHash` et `wanted`) |
 | `collection` | Quantités possédées par carte (`quantity`, `foilQuantity`, `foil`, dates) |
 | `settings` | Paramètres applicatifs (dont `stats_enabled_sets`) |
+| `valueHistory` | Historique de valeur : `collectionSnapshots` (valorisation totale de la collection dans le temps) et `editionSnapshots` (valorisation par édition dans le temps) |
+
+Non inclus, volontairement : les clés API d'export et les identifiants administrateur (données sensibles/propres à chaque serveur).
+
+Les champs `wanted` et `valueHistory` sont rétrocompatibles : une sauvegarde antérieure à leur introduction s'importe normalement, avec `wanted` réinitialisé à `false` et aucun historique de valeur restauré.
 
 ### Format du fichier
 
@@ -249,6 +272,26 @@ Cliquer **⬇️ Télécharger la sauvegarde complète** → génère `lorcalex-
 3. La restauration efface tout, recrée dans le bon ordre et remappe automatiquement les IDs d'éditions dans `stats_enabled_sets`.
 
 > **Utilisation typique :** migration vers un nouveau serveur, récupération après réinitialisation de la base.
+
+---
+
+## Export Dreamborn.ink
+
+Accessible depuis **Administration → Export Dreamborn.ink**, cet export télécharge votre collection dans un fichier CSV importable dans Dreamborn.ink.
+
+La case **Conserver un exemplaire en réserve** est activée par défaut. Lorsqu'elle est cochée, Lorcalex retire un exemplaire foil en priorité pour chaque carte ; en l'absence de foil, il retire un exemplaire normal. Décochez-la pour exporter l'intégralité de vos quantités. L'export ne modifie jamais votre collection.
+
+Les cartes sans numéro de set ou numéro de carte ne sont pas exportées. Les variantes normale et foil sont exportées séparément lorsqu'elles ont une quantité positive.
+
+### Format du fichier
+
+```csv
+Set Number,Card Number,Variant,Count
+4,188,normal,2
+1,13,foil,1
+```
+
+L'endpoint administrateur correspondant est `GET /api/admin/export/dreamborn?reserve=true|false`. Le paramètre `reserve` vaut `true` lorsqu'il est absent.
 
 ---
 
@@ -304,7 +347,156 @@ Les entrées `Regular` et `Foiled` d'une même carte sont distinguées et stock�
 
 L'import est asynchrone. La barre de progression dans l'Administration affiche les phases `📄 Analyse Companion` → `📥 Import Companion` → `✅ Terminé` / `❌ Erreur`.
 
+En fin d'import, le statut expose aussi un bloc structuré `details` contenant au minimum :
+- `importMode` (`fusion` ou `remplacement`)
+- `imported`
+- `skippedUnknown`
+- `skippedInvalidRows`
+- `skippedTotal`
+
 > **Pré-requis :** le mapping Companion repose sur l'`externalId`. Si de nombreuses cartes sont introuvables, relancer d'abord une synchronisation LorcaJson.
+
+---
+
+## Scanner OCR - borne configurable
+
+La validation du format OCR `N/TOTAL • FR • SET` utilise désormais une borne `TOTAL` configurable via le setting `scanner_total_max`.
+
+---
+
+## Synchronisation des prix des cartes
+
+La valorisation des cartes est pilotée par une synchronisation de fond avec garde-fous stricts de quota.
+
+Le moteur de synchronisation parcourt désormais des endpoints paginés provider :
+
+- `GET /episodes?page=n`
+- `GET /episodes/{id}/cards?page=n&per_page=100`
+
+### Règles de quota
+
+- Le quota journalier est compté sur les **tentatives d'appel sortant** (pas sur les succès).
+- Une tentative consomme 1 unité, quel que soit le résultat provider (`2xx`, `4xx`, `5xx`, timeout, erreur réseau).
+- La garde journalière applique un **hard cap** (`pricing_daily_hard_limit`, max 100) et une marge de sécurité (`pricing_daily_safety_margin`).
+- Le budget effectif est `pricing_daily_hard_limit - pricing_daily_safety_margin`.
+- La limite minute (`pricing_minute_limit`) est strictement bornée à 30 appels/minute maximum.
+- Si `usedAttempts >= effectiveDailyBudget`, aucun appel supplémentaire n'est envoyé.
+- Le compteur est persisté (`pricing_usage_date`, `pricing_used_attempts`) pour rester fiable après redémarrage.
+
+### Stratégie de refresh
+
+- Priorité 1 : cartes sans `marketPrice`.
+- Priorité 2 : cartes avec prix mais `lastPriceAt` datant de plus de 7 jours.
+- Priorité 3 : le reste des cartes.
+
+Le mapping provider -> carte locale est déterministe : code d'édition + numéro de carte en priorité, puis fallback contrôlé sur `externalId`.
+
+Les lignes provider dont la `rarity` vaut `Promo` (insensible à la casse) sont ignorées avant toute tentative de mapping : ces cartes ne sont jamais importées dans le catalogue local, donc elles ne peuvent jamais être résolues. Elles ne comptent dans aucun compteur du rapport de synchronisation (`resolvedMappings`, `unresolvedMappings`, `statusCounts`, etc.), n'apparaissent pas dans les échantillons `mappingSamples`/`priceSamples`, et ne déclenchent aucun log diagnostic (même avec `pricing_log_unresolved_mapping_enabled` activé).
+
+### Extraction du prix provider
+
+Pour chaque ligne provider, le prix est recherché dans cet ordre, uniquement si le conteneur indique `currency: EUR` (comparaison insensible à la casse) :
+
+1. `prices.cardmarket.7d_average`
+2. `prices.cardmarket.30d_average`
+3. `prices.cardmarket.lowest_near_mint_FR`
+4. `prices.cardmarket.lowest_near_mint_FR_EU_only`
+5. `prices.cardmarket.lowest_near_mint`
+6. `prices.tcg_player.market_price`
+
+Les valeurs nulles sont ignorées, mais `0` est un prix valide. Si aucun de ces six champs n'est exploitable, le prix reste non résolu (`UNRESOLVED_PRICE`) : aucun fallback générique sur d'autres champs du payload n'est appliqué.
+
+Les deux premiers candidats (`7d_average`, `30d_average`) sont en plus soumis à un garde-fou de plausibilité : une médiane de référence est calculée à partir de toutes les valeurs non nulles et non nulles-en-valeur (`0` exclu) parmi les 8 variantes régionales `lowest_near_mint*` (`lowest_near_mint`, `_EU_only`, `_DE`, `_DE_EU_only`, `_FR`, `_FR_EU_only`, `_IT`, `_IT_EU_only`) et les deux moyennes elles-mêmes. Cette médiane n'est calculée que si au moins 5 valeurs sont disponibles ; en dessous de ce seuil, `7d_average`/`30d_average` sont utilisés tels quels (comportement historique). Quand la médiane est calculable, une valeur strictement inférieure au cinquième de la médiane ou strictement supérieure à cinq fois la médiane est considérée comme aberrante et écartée (la borne exacte `médiane × 5` est acceptée) ; le candidat suivant de la liste est alors évalué normalement. Ce garde-fou ne s'applique qu'à `7d_average`/`30d_average` — `lowest_near_mint_FR`, `lowest_near_mint_FR_EU_only`, `lowest_near_mint` et `tcg_player.market_price` restent évalués sans vérification de plausibilité.
+
+### Exécution
+
+- Tâche planifiée quotidienne basée sur `pricing_schedule_cron` (modifiable en administration, sans redémarrage).
+- Si le cron est invalide, fallback automatique sur `0 0 2 * * *` avec statut de validité exposé.
+- Au démarrage, un rattrapage unique (`startup_catchup`) est déclenché si la journée courante n'a pas encore eu de run planifié.
+- Déclenchement manuel disponible via `POST /api/admin/pricing/run`.
+- Un curseur persistant (phase/page/episode) permet de reprendre la pagination après interruption ou redémarrage.
+- Statut opérationnel via `GET /api/admin/pricing/status` (hard cap, marge, budget effectif, minute limiter, curseur, raison d'arrêt, files de traitement, état du schedule et dernier run planifié).
+
+### Onglet Prix
+
+Un onglet `Prix` expose une vue opérationnelle en lecture seule:
+
+- Le top des cartes possédées valorisées, trié par prix unitaire EUR décroissant. Le sélecteur permet d'afficher les 20, 50 ou 100 premières cartes ; les quantités normale et foil sont affichées sans influencer le rang.
+- La valorisation par édition suivie (même périmètre que `stats_enabled_sets`).
+- Pour chaque édition suivie, le coût des cartes manquantes (non possédées, ni normal ni foil) de rareté `Commune`, `Inhabituelle`, `Rare`, `Très Rare` ou `Légendaire`, affiché sous le libellé **Coût des cartes manquantes (Courantes et Légendaire)**. Les cartes manquantes sans prix connu sont exclues du total mais comptabilisées dans un indicateur global par édition ("prix inconnu pour X cartes, coût minoré").
+- Le total global de valorisation collection en EUR.
+- Un graphique historique de la valeur totale de la collection calculé à chaque synchronisation pricing.
+- Un tableau par édition affichant la valeur courante et les écarts sur 7 jours et 30 jours.
+- Les 20 dernières cartes du catalogue ayant reçu un prix (`lastPriceAt` décroissant), en bas de l'onglet.
+- Un bouton **Recalculer** à côté de la valeur totale permet de forcer, à tout moment, un nouveau snapshot de la valeur totale et par édition à partir des prix déjà stockés en base (`POST /api/pricing/recompute-value`). Aucun appel au fournisseur de prix n'est effectué et aucun budget de synchronisation n'est consommé. Le bouton se désactive pendant le calcul, affiche une confirmation (toast) en cas de succès, et affiche le message d'erreur ainsi que la cause racine en cas d'échec.
+
+Depuis la fiche d'une carte présente dans le top, l'action confirmée **Supprimer le prix** efface uniquement ses données de cotation. Les quantités normale et foil restent inchangées ; la carte est exclue de la valorisation et du top jusqu'à la prochaine synchronisation EUR.
+
+Règle de valorisation par carte:
+
+- `(quantity + foilQuantity) x marketPrice`
+
+Contraintes monétaires:
+
+- Affichage et agrégats en EUR uniquement.
+- Les cartes sans prix (`marketPrice` null) ou avec devise non-EUR sont exclues des agrégats.
+- Le payload de l'onglet Prix expose des compteurs d'exclusion (`excludedNoPrice`, `excludedNonEur`).
+
+### Historique de valeur et tendances
+
+Après chaque synchronisation pricing réussie, le backend enregistre un snapshot global puis un snapshot par édition. Un snapshot peut aussi être déclenché manuellement depuis l'onglet Prix (voir ci-dessus), sans passer par une synchronisation pricing.
+
+- `GET /api/pricing/trend` renvoie les points de valeur totale de la collection triés chronologiquement (chaque point inclut son identifiant de snapshot).
+- `GET /api/pricing/edition-deltas` renvoie pour chaque édition la valeur courante, la valeur de référence à 7 jours et à 30 jours, ainsi que les variations en pourcentage.
+- `POST /api/pricing/recompute-value` recalcule et persiste un nouveau snapshot (global + par édition) à partir des prix actuellement stockés, sans appel au fournisseur de prix.
+- `DELETE /api/pricing/trend/{snapshotId}` supprime définitivement un point de la courbe de valeur totale (utile pour retirer un point aberrant produit par une synchronisation défaillante), ainsi que tous les snapshots par édition enregistrés au même instant. Aucun recalcul compensatoire n'est effectué : les deltas 7j/30j utiliseront simplement le snapshot restant le plus proche du seuil au prochain calcul. Cette suppression est irréversible.
+- Dans l'onglet Prix, un historique détaillé (repliable, masqué par défaut sous le graphique) liste chaque point avec un bouton de suppression, demandant confirmation avant d'agir.
+- Les deltas sont calculés à partir des snapshots historiques les plus récents à ou avant les seuils temporels.
+
+Le modèle de données historique est donc aligné sur la chronologie des synchronisations, ce qui permet de tracer la valeur globale sur le temps et de comparer l'évolution par set.
+
+### Paramètres principaux
+
+Les clés de configuration pricing sont stockées dans `app_settings` et modifiables via les endpoints admin settings :
+
+- `pricing_sync_enabled`
+- `pricing_daily_hard_limit`
+- `pricing_daily_safety_margin`
+- `pricing_minute_limit`
+- `pricing_daily_budget`
+- `pricing_usage_date`
+- `pricing_used_attempts`
+- `pricing_schedule_cron`
+- `pricing_last_scheduled_run_date`
+- `pricing_provider`
+- `pricing_provider_host`
+- `pricing_provider_episodes_path`
+- `pricing_provider_episode_cards_path_template`
+- `pricing_provider_api_key`
+- `pricing_provider_currency`
+- `pricing_cursor_phase`
+- `pricing_cursor_episode_page`
+- `pricing_cursor_episode_id`
+- `pricing_cursor_episode_cards_page`
+- `pricing_last_stop_reason`
+- `pricing_log_high_price_enabled` : active/désactive le log `"High market price detected"` (défaut : `true`, comportement historique inchangé).
+- `pricing_log_high_price_threshold` : montant (EUR, entier) à partir duquel le log `"High market price detected"` se déclenche pour une carte (défaut : `5`, strictement supérieur — un prix égal au seuil ne déclenche pas le log ; pas de borne haute, une valeur négative est ramenée à `0`).
+- `pricing_log_unresolved_mapping_enabled` : active/désactive un log de diagnostic (une ligne par carte) pour chaque carte en `UNRESOLVED_MAPPING`, incluant le payload provider brut et les critères de recherche testés (défaut : `false`, à activer ponctuellement pour déboguer). Ce log n'affecte pas les échantillons `mappingSamples` (toujours plafonnés à 3) renvoyés dans les rapports de synchronisation.
+- `pricing_log_abnormal_price_enabled` : active/désactive une alerte indépendante `"Abnormal price detected for low rarity card"` déclenchée quand une carte d'une rarité "basse" (voir `pricing_log_abnormal_price_rarities`) dépasse le seuil configuré (défaut : `false`, opt-in). Ce log est totalement indépendant de `pricing_log_high_price_enabled` : les deux peuvent se déclencher simultanément pour la même carte sans interaction entre eux.
+- `pricing_log_abnormal_price_threshold` : montant (EUR, entier) à partir duquel l'alerte de prix anormal se déclenche (défaut : `5`, strictement supérieur, pas de borne haute, valeur négative ramenée à `0`).
+- `pricing_log_abnormal_price_rarities` : liste de raretés provider (valeur brute du champ `rarity` renvoyé par l'API, pas la rareté locale en français) surveillées par l'alerte, séparées par des virgules, comparées insensible à la casse (défaut : `Common,Uncommon,rare,Super_rare`). Ces cinq réglages sont modifiables depuis l'onglet Admin, section "Synchronisation des prix".
+
+### Import / Export et restauration
+
+Les sauvegardes et exports conservent les champs de valorisation :
+
+- `marketPrice`
+- `priceCurrency`
+- `priceSource`
+- `lastPriceAt`
+- `lastPriceStatus`
+
+La conservation de `lastPriceAt` est importante pour maintenir la priorisation de fraîcheur (stale > 7 jours) après restauration.
 
 ---
 
@@ -323,6 +515,7 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 | `GET` | `/api/cards/{id}` | JWT | Détail carte |
 | `GET` | `/api/cards/lookup?number=&editionId=` | JWT | Lookup scanner |
 | `GET` | `/api/cards/fingerprints` | JWT | Empreintes visuelles |
+| `PATCH` | `/api/cards/{id}/wanted` | JWT | Marque/démarque une carte comme "voulue" |
 | `GET/POST` | `/api/collection` | JWT | Collection possédée |
 | `GET` | `/api/collection/recent?limit=20` | JWT | Derniers scans (10/20/25/50) |
 | `PUT` | `/api/collection/{cardId}` | JWT | Modifier quantités |
@@ -335,6 +528,7 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 | `GET` | `/api/admin/lorcajson-url` | JWT | URL LorcaJson configurée |
 | `POST` | `/api/admin/compute-hashes` | JWT | Calcul d'empreintes visuelles |
 | `GET` | `/api/admin/backup` | JWT | Sauvegarde complète |
+| `GET` | `/api/admin/export/dreamborn?reserve=true|false` | JWT | Export CSV Dreamborn.ink, avec réserve activée par défaut |
 | `POST` | `/api/admin/restore` | JWT | Restauration complète |
 | `POST` | `/api/admin/import/companion?merge=` | JWT | Import Lorcana Companion |
 | `GET` | `/api/admin/apikeys` | JWT | Liste des clés API |
@@ -347,7 +541,28 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 
 - JWT stateless (HMAC-SHA256), BCrypt pour les mots de passe.
 - Les clés API sont stockées en hash SHA-256 uniquement — la valeur en clair n'est jamais persistée.
+- L'accès à `/api/export` est validé par un filtre dédié (`ApiKeyAuthFilter`) dans la chaîne Spring Security.
 - **Changer `APP_PASSWORD` et `JWT_SECRET` en production.**
+
+---
+
+## Compatibilité import/export
+
+Le contrat de backup/export suit une politique **N/N-1**.
+
+- Les payloads de version courante (N) et version précédente (N-1) doivent rester importables.
+- Toute évolution de schéma impose des tests unitaires et d'intégration de compatibilité.
+- La CI exécute un gate dédié sur ces tests.
+
+---
+
+## Gouvernance de la vérité produit
+
+- Phase 1 : le code reste la vérité d'exécution pendant la transition.
+- Phase 2 : OpenSpec devient la source canonique.
+- Toute évolution fonctionnelle doit mettre à jour README + CHANGELOG.
+
+Références internes : `docs/source-of-truth-governance.md`, `docs/technical-decisions.md`
 
 ---
 

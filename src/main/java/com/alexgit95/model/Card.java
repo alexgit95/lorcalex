@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -50,6 +51,20 @@ public class Card {
     private String externalId;
 
     private Long imageHash;
+
+    @Column(precision = 10, scale = 2)
+    private BigDecimal marketPrice;
+
+    private String priceCurrency;
+
+    private String priceSource;
+
+    private LocalDateTime lastPriceAt;
+
+    private String lastPriceStatus;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private Boolean wanted = false;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "edition_id")

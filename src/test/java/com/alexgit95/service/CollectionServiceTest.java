@@ -15,6 +15,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -87,8 +88,24 @@ class CollectionServiceTest {
     }
 
     @Test
-    @DisplayName("addCard — new card, foil=true → persisted with foil true")
-    void addCard_newCard_foilTrue() {
+    @DisplayName("addCard — bumps lastAddedAt so the card surfaces in Récents")
+    void addCard_bumpsLastAddedAt() {
+        when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
+        when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        LocalDateTime before = LocalDateTime.now().minusSeconds(1);
+        collectionService.addCard(10L, 1, 0, false);
+        LocalDateTime after = LocalDateTime.now().plusSeconds(1);
+
+        ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
+        verify(collectionRepository).save(captor.capture());
+
+        assertThat(captor.getValue().getLastAddedAt()).isAfter(before).isBefore(after);
+    }
+
+    @Test
+    @DisplayName("addCard — new card, foilQuantity=0 keeps foil false even if foil=true input")
+    void addCard_newCard_foilInputIgnoredWhenNoFoilQuantity() {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -97,18 +114,35 @@ class CollectionServiceTest {
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
 
-        assertThat(captor.getValue().getFoil()).isTrue();
+        assertThat(captor.getValue().getFoil()).isFalse();
         assertThat(captor.getValue().getQuantity()).isEqualTo(2);
+        assertThat(result.getFoil()).isFalse();
+    }
+
+    @Test
+    @DisplayName("addCard — foilQuantity>0 forces foil=true")
+    void addCard_newCard_positiveFoilQuantityForcesFoilTrue() {
+        when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
+        when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CardDTO result = collectionService.addCard(10L, 0, 2, false);
+
+        ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
+        verify(collectionRepository).save(captor.capture());
+
+        assertThat(captor.getValue().getFoil()).isTrue();
+        assertThat(captor.getValue().getFoilQuantity()).isEqualTo(2);
         assertThat(result.getFoil()).isTrue();
     }
 
     @Test
-    @DisplayName("addCard — existing card: quantity incremented and foil updated")
-    void addCard_existingCard_incrementsQuantityAndUpdatesFoil() {
+    @DisplayName("addCard — existing card: quantity incremented and foil follows foilQuantity")
+    void addCard_existingCard_incrementsQuantityAndFoilFollowsFoilQuantity() {
         UserCollection existing = new UserCollection();
         existing.setCard(card);
         existing.setQuantity(2);
         existing.setFoil(false);
+        existing.setFoilQuantity(0);
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -118,18 +152,19 @@ class CollectionServiceTest {
         verify(collectionRepository).save(captor.capture());
 
         assertThat(captor.getValue().getQuantity()).isEqualTo(3);
-        assertThat(captor.getValue().getFoil()).isTrue();
+        assertThat(captor.getValue().getFoil()).isFalse();
     }
 
     // ─── updateQuantity ───────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("updateQuantity — foil provided: quantity and foil updated")
-    void updateQuantity_withFoil_updatesBothFields() {
+    @DisplayName("updateQuantity — foil invariant is derived from foilQuantity")
+    void updateQuantity_foilInvariantDerivedFromFoilQuantity() {
         UserCollection existing = new UserCollection();
         existing.setCard(card);
         existing.setQuantity(1);
         existing.setFoil(false);
+        existing.setFoilQuantity(0);
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -139,17 +174,18 @@ class CollectionServiceTest {
         verify(collectionRepository).save(captor.capture());
 
         assertThat(captor.getValue().getQuantity()).isEqualTo(3);
-        assertThat(captor.getValue().getFoil()).isTrue();
-        assertThat(result.getFoil()).isTrue();
+        assertThat(captor.getValue().getFoil()).isFalse();
+        assertThat(result.getFoil()).isFalse();
     }
 
     @Test
-    @DisplayName("updateQuantity — foil=null: foil value is NOT changed")
-    void updateQuantity_foilNull_doesNotChangeFoil() {
+    @DisplayName("updateQuantity — foil value follows foilQuantity even when foil input is null")
+    void updateQuantity_foilNull_stillFollowsFoilQuantity() {
         UserCollection existing = new UserCollection();
         existing.setCard(card);
         existing.setQuantity(1);
         existing.setFoil(true);
+        existing.setFoilQuantity(3);
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -158,8 +194,7 @@ class CollectionServiceTest {
         ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
         verify(collectionRepository).save(captor.capture());
 
-        // foil must be preserved at its original value
-        assertThat(captor.getValue().getFoil()).isTrue();
+        assertThat(captor.getValue().getFoil()).isFalse();
         assertThat(captor.getValue().getQuantity()).isEqualTo(2);
     }
 
@@ -177,7 +212,7 @@ class CollectionServiceTest {
     }
 
     @Test
-    @DisplayName("updateQuantity — new entry (not yet in collection): creates it")
+    @DisplayName("updateQuantity — new entry computes foil from foilQuantity")
     void updateQuantity_noExistingEntry_createsNew() {
         when(collectionRepository.findByCardId(10L)).thenReturn(Optional.empty());
         when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -188,6 +223,26 @@ class CollectionServiceTest {
         verify(collectionRepository).save(captor.capture());
 
         assertThat(captor.getValue().getQuantity()).isEqualTo(5);
-        assertThat(captor.getValue().getFoil()).isTrue();
+        assertThat(captor.getValue().getFoil()).isFalse();
+    }
+
+    @Test
+    @DisplayName("updateQuantity — bumps lastAddedAt on an existing, previously-stale entry")
+    void updateQuantity_bumpsLastAddedAt() {
+        UserCollection existing = new UserCollection();
+        existing.setCard(card);
+        existing.setQuantity(1);
+        existing.setLastAddedAt(LocalDateTime.now().minusDays(30));
+        when(collectionRepository.findByCardId(10L)).thenReturn(Optional.of(existing));
+        when(collectionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        LocalDateTime before = LocalDateTime.now().minusSeconds(1);
+        collectionService.updateQuantity(10L, 3, 0, null);
+        LocalDateTime after = LocalDateTime.now().plusSeconds(1);
+
+        ArgumentCaptor<UserCollection> captor = ArgumentCaptor.forClass(UserCollection.class);
+        verify(collectionRepository).save(captor.capture());
+
+        assertThat(captor.getValue().getLastAddedAt()).isAfter(before).isBefore(after);
     }
 }

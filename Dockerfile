@@ -6,6 +6,8 @@
 FROM eclipse-temurin:25.0.4_7-jdk AS backend-build
 WORKDIR /app
 
+ARG GIT_COMMIT=unknown
+
 COPY .mvn .mvn
 # Copy Maven wrapper & POM first for dependency caching
 COPY mvnw mvnw.cmd pom.xml ./
@@ -19,7 +21,7 @@ RUN ./mvnw dependency:go-offline -B
 
 # Copy sources and build
 COPY src ./src
-RUN ./mvnw package -DskipTests -B
+RUN ./mvnw package -DskipTests -B -Dgit.commit=${GIT_COMMIT}
 
 # ─────────────────────────────────────────────────────────────
 # Stage 2 : Image finale légère (JRE seulement)

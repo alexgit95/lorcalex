@@ -1,0 +1,82 @@
+{
+  "backupDate": "2026-08-25T12:00:00",
+  "version": "2",
+  "totalEditions": 1,
+  "totalCards": 1,
+  "totalCollection": 1,
+  "editions": [
+    {
+      "id": 1,
+      "code": "TFC",
+      "name": "Premier Chapitre",
+      "totalCards": 1,
+      "releaseDate": "2023-09-01",
+      "logoUrl": null,
+      "setNumber": 1
+    }
+  ],
+  "cards": [
+    {
+      "externalId": "compat-ext-1",
+      "cardNumber": 1,
+      "editionCode": "TFC",
+      "name": "Compat Card",
+      "rarity": "Rare",
+      "cost": 2,
+      "inkColor": "Ambre",
+      "type": "Personnage",
+      "subtypes": "Héros",
+      "bodyText": "",
+      "flavorText": "",
+      "imageUrl": null,
+      "thumbnailUrl": null,
+      "artist": "Compat Artist",
+      "inkable": true,
+      "imageHash": null,
+      "marketPrice": 12.34,
+      "priceCurrency": "EUR",
+      "priceSource": "rapidapi-lorcana-prices",
+      "lastPriceAt": "2026-08-25T09:30:00",
+      "lastPriceStatus": "SUCCESS",
+      "wanted": true
+    }
+  ],
+  "collection": [
+    {
+      "externalId": "compat-ext-1",
+      "cardNumber": 1,
+      "editionCode": "TFC",
+      "quantity": 0,
+      "foilQuantity": 1,
+      "foil": true,
+      "firstAddedAt": "2026-08-24T10:00:00",
+      "lastAddedAt": "2026-08-25T10:00:00"
+    }
+  ],
+  "settings": [
+    {
+      "key": "stats_enabled_sets",
+      "value": "1",
+      "description": "Compat fixture"
+    }
+  ],
+  "valueHistory": {
+    "collectionSnapshots": [
+      {
+        "recordedAt": "2026-08-25T02:00:00",
+        "totalCollectionValueEur": 12.34,
+        "currency": "EUR",
+        "source": "PRICING_SYNC"
+      }
+    ],
+    "editionSnapshots": [
+      {
+        "recordedAt": "2026-08-25T02:00:00",
+        "editionId": 1,
+        "editionCode": "TFC",
+        "editionName": "Premier Chapitre",
+        "totalValueEur": 12.34
+      }
+    ]
+  }
+}

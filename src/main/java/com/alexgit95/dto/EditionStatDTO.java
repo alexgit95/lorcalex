@@ -13,4 +13,5 @@ public class EditionStatDTO {
     private long missingCards;
     private double completionPercentage;
     private List<RarityStatDTO> byRarity;
+    private List<MissingByColorDTO> missingByColor;
 }

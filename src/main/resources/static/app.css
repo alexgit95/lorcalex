@@ -71,12 +71,25 @@ body {
   letter-spacing: 0.5px;
 }
 
+.build-identity {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 /* Cards grid */
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 10px;
   padding: 12px;
+}
+
+/* Collection page grid only: adaptive column cap (max 10), driven by JS via --cols. */
+#cardsArea .cards-grid {
+  grid-template-columns: repeat(var(--cols, 3), 1fr);
 }
 
 /* Card item */
@@ -107,6 +120,11 @@ body {
   aspect-ratio: 600/840;
   object-fit: cover;
   display: block;
+  background: var(--bg-card2);
+}
+
+/* Collection grid only: skeleton shown until the lazily-loaded image finishes loading. */
+.card-img-lazy {
   background: var(--bg-card2);
 }
 
@@ -147,6 +165,57 @@ body {
   align-items: center;
   justify-content: center;
   font-weight: bold;
+}
+
+/* Wanted marker: gold border overlay while the card is not yet owned. */
+.card-item.wanted {
+  border-color: #d4af37;
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.5);
+}
+
+.wanted-toggle {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  color: #d4af37;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.wanted-toggle.active {
+  color: #ffd54f;
+}
+
+/* Non-blocking confetti overlay for the scan celebration. */
+.confetti-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 9999;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confetti-fall linear infinite;
+}
+
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(360deg); opacity: 0.8; }
 }
 
 /* Rarity colors */
@@ -210,11 +279,49 @@ body {
   text-decoration: none;
   transition: color 0.15s;
   flex: 1;
+  min-width: 0;
 }
 
 .nav-item svg {
   width: 24px;
   height: 24px;
+}
+
+@media (max-width: 400px) {
+  .nav-item {
+    padding: 8px 4px;
+  }
+
+  .nav-item svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .nav-item span {
+    font-size: 0.58rem;
+  }
+}
+
+/* Toast notifications */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--nav-height) + 16px);
+  transform: translateX(-50%);
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--success);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 400;
+  max-width: 90vw;
+  font-size: .88rem;
+}
+
+.toast-error {
+  border-left-color: var(--danger);
 }
 
 .nav-item span {

@@ -1,0 +1,35 @@
+name: Documentation Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  readme-changelog-required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce README and CHANGELOG updates on behavior changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -qE '^src/main/|^src/main/resources/static/|^src/main/resources/application'; then
+            if ! echo "$CHANGED" | grep -q '^README.md$'; then
+              echo "Behavior-related code changed but README.md was not updated."
+              exit 1
+            fi
+            if ! echo "$CHANGED" | grep -q '^CHANGELOG.md$'; then
+              echo "Behavior-related code changed but CHANGELOG.md was not updated."
+              exit 1
+            fi
+          fi

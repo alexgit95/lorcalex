@@ -25,8 +25,11 @@ async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     let msg = `HTTP ${response.status}`;
-    try { const j = await response.json(); msg = j.message || msg; } catch { /* ignore */ }
-    throw new Error(msg);
+    let rootCause;
+    try { const j = await response.json(); msg = j.message || msg; rootCause = j.rootCause; } catch { /* ignore */ }
+    const error = new Error(msg);
+    error.rootCause = rootCause;
+    throw error;
   }
 
   const ct = response.headers.get('content-type') || '';
@@ -55,6 +58,9 @@ const api = {
 
   getFingerprints: () => apiFetch('/cards/fingerprints'),
 
+  setWanted: (cardId, wanted) =>
+    apiFetch(`/cards/${cardId}/wanted`, { method: 'PATCH', body: JSON.stringify({ wanted }) }),
+
   addToCollection: (cardId, quantity = 1, foilQuantity = 0) =>
     apiFetch('/collection', { method: 'POST', body: JSON.stringify({ cardId, quantity, foilQuantity }) }),
 
@@ -68,7 +74,16 @@ const api = {
 
   getStatistics: () => apiFetch('/statistics'),
 
+  getPricingInsights: () => apiFetch('/pricing/insights'),
+  removeCardPrice: (cardId) => apiFetch(`/pricing/cards/${cardId}/price`, { method: 'DELETE' }),
+  getTrend: () => apiFetch('/pricing/trend'),
+  deleteTrendPoint: (snapshotId) => apiFetch(`/pricing/trend/${snapshotId}`, { method: 'DELETE' }),
+  getEditionDeltas: () => apiFetch('/pricing/edition-deltas'),
+  recomputeValue: () => apiFetch('/pricing/recompute-value', { method: 'POST' }),
+
   getSettings: () => apiFetch('/admin/settings'),
+
+  getBuildIdentity: () => apiFetch('/admin/version'),
 
   updateSetting: (key, value) =>
     apiFetch(`/admin/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
@@ -94,10 +109,24 @@ const api = {
 
   getProgress: () => apiFetch('/admin/progress'),
 
+  getPricingStatus: () => apiFetch('/admin/pricing/status'),
+
+  runPricingSync: (maxAttempts) => apiFetch('/admin/pricing/run', {
+    method: 'POST',
+    body: JSON.stringify(maxAttempts === undefined ? {} : { maxAttempts })
+  }),
+
+  simulatePricingImport: (json) => apiFetch('/admin/pricing/simulate-import', {
+    method: 'POST',
+    body: JSON.stringify({ json })
+  }),
+
   computeHashes: () => apiFetch('/admin/compute-hashes', { method: 'POST' }),
 
   fullBackup: () => apiFetch('/admin/backup'),
   fullRestore: (data) => apiFetch('/admin/restore', { method: 'POST', body: JSON.stringify(data) }),
+  exportDreamborn: (reserve) =>
+    apiFetch('/admin/export/dreamborn?reserve=' + encodeURIComponent(String(!!reserve))),
 
   getRecentCards: (limit = 20) => apiFetch('/collection/recent?limit=' + limit),
 
@@ -158,6 +187,8 @@ function handleRoute() {
 
   stopCamera(); // clean up scanner camera if leaving scanner page
   stopSyncPoll(); // stop admin progress polling
+  disconnectCollectionColumnObserver(); // stop column resize tracking if leaving collection page
+  stopWantedCelebration(); // stop looping confetti if leaving scanner page
   renderPage(page);
 }
 
@@ -166,6 +197,7 @@ function renderPage(page) {
     case 'login':      renderLogin();           break;
     case 'collection': renderCollection();      break;
     case 'statistics': renderStatistics();      break;
+    case 'pricing':    renderPricingPage();     break;
     case 'scanner':    renderScanner();         break;
     case 'recent':     renderRecentScansPage(); break;
     case 'admin':      renderAdmin();           break;
@@ -189,6 +221,9 @@ function navHTML(active) {
     ${item('statistics',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zM16.2 13h2.8v6h-2.8v-6z"/></svg>`,
       'Stats')}
+    ${item('pricing',
+      `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5a10.5 10.5 0 1 0 10.5 10.5A10.51 10.51 0 0 0 12 1.5zm0 19a8.5 8.5 0 1 1 8.5-8.5 8.51 8.51 0 0 1-8.5 8.5zm1.2-8.9-1.9-.7c-.7-.2-.9-.5-.9-.9 0-.5.4-.9 1.1-.9.7 0 1.2.3 1.5.7l1.5-1.1A3.39 3.39 0 0 0 13 7.3V6h-2v1.3a3.01 3.01 0 0 0-2.7 3c0 1.6 1 2.4 2.6 3l1.8.7c.6.2.9.5.9 1 0 .6-.5 1-1.3 1-.8 0-1.5-.4-1.9-1l-1.6 1.1A4.18 4.18 0 0 0 11 17.7V19h2v-1.3a3.17 3.17 0 0 0 2.8-3.1c0-1.6-.9-2.5-2.6-3.1z"/></svg>`,
+      'Prix')}
     ${item('scanner',
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 6.5v3h-3v-3h3M11 5H5v6h6V5zm-1.5 9.5v3h-3v-3h3M11 13H5v6h6v-6zm6.5-6.5v3h-3v-3h3M19 5h-6v6h6V5zm-6 8h1.5v1.5H13V13zm1.5 1.5H16V16h-1.5v-1.5zM16 13h1.5v1.5H16V13zm-3 3h1.5v1.5H13V16zm1.5 1.5H16V19h-1.5v-1.5zM16 16h1.5v1.5H16V16zm1.5-1.5H19V16h-1.5v-1.5zm0 3H19V19h-1.5v-1.5zM22 7h-2V4h-3V2h5v5zm0 15v-5h-2v3h-3v2h5zM2 22h5v-2H4v-3H2v5zM2 2v5h2V4h3V2H2z"/></svg>`,
       'Scanner')}
@@ -213,6 +248,14 @@ function loadingHTML(label = 'Chargement...') {
   return `<div class="loading-center"><div class="spinner"></div><span>${label}</span></div>`;
 }
 
+function showToast(message, { error = false, duration = 3500 } = {}) {
+  const toast = document.createElement('div');
+  toast.className = `toast${error ? ' toast-error' : ''}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), duration);
+}
+
 function formatDate(isoStr) {
   if (!isoStr) return '';
   const d = new Date(isoStr);
@@ -226,8 +269,48 @@ function formatDateTime(isoStr) {
     + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatEuro(value) {
+  const amount = typeof value === 'number' ? value : Number(value || 0);
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+function priceMetadataHTML(card) {
+  const price = card.marketPrice != null
+    ? `<div>Prix : <strong style="color:var(--accent)">${formatEuro(card.marketPrice)}</strong></div>`
+    : '';
+  const updatedAt = card.lastPriceAt
+    ? `<div>Dernière mise à jour : <strong style="color:var(--text)">${formatDateTime(card.lastPriceAt)}</strong></div>`
+    : '';
+
+  if (!price && !updatedAt) return '';
+
+  return `<div style="font-size:.8rem;color:var(--text-muted);margin-top:10px;line-height:1.6">${price}${updatedAt}</div>`;
+}
+
+function formatSignedPercent(value) {
+  if (value == null || value === '') return '—';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
+}
+
+function percentTone(value) {
+  if (value == null || value === '') return 'var(--text-muted)';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 'var(--text-muted)';
+  return num >= 0 ? 'var(--success)' : 'var(--danger)';
+}
+
 let recentCardsState = [];
 let recentLimit = 20;
+let pricingCardsState = [];
+let ownedPricingCardsState = [];
+let ownedPricingLimit = 20;
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
@@ -291,6 +374,47 @@ function renderLogin() {
 
 const collState = { editions: [], edition: null, cards: [], filter: 'all', search: '', modal: null };
 
+// Nombre de colonnes de la grille Collection, plafonné à 10, recalculé au resize.
+let _collResizeObserver = null;
+let _collResizeRaf = null;
+
+function disconnectCollectionColumnObserver() {
+  if (_collResizeObserver) {
+    _collResizeObserver.disconnect();
+    _collResizeObserver = null;
+  }
+  if (_collResizeRaf) {
+    cancelAnimationFrame(_collResizeRaf);
+    _collResizeRaf = null;
+  }
+}
+
+function setupCollectionColumnObserver() {
+  const area = document.getElementById('cardsArea');
+  if (!area) return;
+  disconnectCollectionColumnObserver();
+  const recompute = () => {
+    const cols = Math.max(1, Math.min(10, Math.floor(area.clientWidth / 110)));
+    area.style.setProperty('--cols', cols);
+  };
+  _collResizeObserver = new ResizeObserver(() => {
+    if (_collResizeRaf) cancelAnimationFrame(_collResizeRaf);
+    _collResizeRaf = requestAnimationFrame(recompute);
+  });
+  _collResizeObserver.observe(area);
+  recompute();
+}
+
+let _searchDebounceTimer = null;
+
+function updateSearchHint(trimmedQuery) {
+  const hintEl = document.getElementById('searchHint');
+  if (!hintEl) return;
+  hintEl.textContent = (trimmedQuery.length > 0 && trimmedQuery.length < 3)
+    ? 'Tapez au moins 3 caractères pour rechercher.'
+    : '';
+}
+
 function renderCollection() {
   document.getElementById('app').innerHTML = `
     <div class="app">
@@ -308,6 +432,7 @@ function renderCollection() {
         <div class="search-bar">
           <input class="search-input" id="searchInput" placeholder="Rechercher une carte…" value="${esc(collState.search)}" />
         </div>
+        <div id="searchHint" style="font-size:.72rem;color:var(--text-muted);padding:0 12px 6px"></div>
         <div id="cardsArea">${loadingHTML()}</div>
       </div>
       ${navHTML('collection')}
@@ -326,8 +451,13 @@ function renderCollection() {
   document.getElementById('addManualBtn').addEventListener('click', openAddManualModal);
 
   document.getElementById('searchInput').addEventListener('input', e => {
-    collState.search = e.target.value;
-    renderCards();
+    const value = e.target.value;
+    updateSearchHint(value.trim());
+    clearTimeout(_searchDebounceTimer);
+    _searchDebounceTimer = setTimeout(() => {
+      collState.search = value;
+      renderCards();
+    }, 300);
   });
 
   if (collState.editions.length === 0) {
@@ -341,6 +471,7 @@ function renderCollection() {
     renderEditionBar();
     loadCards();
   }
+  setupCollectionColumnObserver();
 }
 
 function renderEditionBar() {
@@ -392,11 +523,13 @@ const RARITY_COLORS = {
 
 function renderCards() {
   const { cards, filter, search } = collState;
+  const trimmedSearch = search.trim();
+  const searchActive = trimmedSearch.length >= 3;
   const filtered = cards.filter(c => {
     if (filter === 'owned' && !c.owned) return false;
     if (filter === 'missing' && c.owned) return false;
     if (filter === 'foil' && !(c.foilQuantity > 0)) return false;
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (searchActive && !c.name.toLowerCase().includes(trimmedSearch.toLowerCase())) return false;
     return true;
   });
 
@@ -419,6 +552,42 @@ function renderCards() {
   area.querySelectorAll('.card-item').forEach(el => {
     el.addEventListener('click', () => openModal(parseInt(el.dataset.id)));
   });
+  area.querySelectorAll('.wanted-toggle').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleWantedInGrid(parseInt(el.dataset.id));
+    });
+  });
+  area.querySelectorAll('.card-img-lazy').forEach(img => {
+    img.addEventListener('load', () => img.classList.remove('card-img-lazy'), { once: true });
+    getLazyImageObserver().observe(img);
+  });
+}
+
+// Observateur partagé : ne charge une image de la grille Collection qu'à l'approche du viewport.
+let _lazyImageObserver = null;
+function getLazyImageObserver() {
+  if (_lazyImageObserver) return _lazyImageObserver;
+  _lazyImageObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const img = entry.target;
+      if (img.dataset.src) {
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+      }
+      observer.unobserve(img);
+    });
+  }, { rootMargin: '100% 0px' });
+  return _lazyImageObserver;
+}
+
+async function toggleWantedInGrid(cardId) {
+  const card = collState.cards.find(c => c.id === cardId);
+  if (!card) return;
+  const updated = await api.setWanted(cardId, !card.wanted);
+  collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
+  renderCards();
 }
 
 function cardItemHTML(card) {
@@ -426,12 +595,14 @@ function cardItemHTML(card) {
   const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
   const totalQty = (card.quantity || 0) + (card.foilQuantity || 0);
   const hasFoil = card.foilQuantity && card.foilQuantity > 0;
-  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}" data-id="${card.id}">
-    ${card.imageUrl
-      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+  const showWanted = card.wanted && !card.owned;
+  const gridImageUrl = card.thumbnailUrl || card.imageUrl;
+  return `<div class="card-item ${card.owned ? 'owned' : 'missing'}${hasFoil ? ' foil' : ''}${showWanted ? ' wanted' : ''}" data-id="${card.id}">
+    ${gridImageUrl
+      ? `<img data-src="${esc(gridImageUrl)}" alt="${esc(card.name)}" class="card-img-lazy" onerror="this.style.display='none'" />`
       : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
     ${hasFoil ? `<div class="foil-badge">✦ Foil</div>` : ''}
-    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : ''}
+    ${card.owned ? `<div class="owned-badge">${totalQty > 1 ? totalQty : '✓'}</div>` : `<button class="wanted-toggle${card.wanted ? ' active' : ''}" data-id="${card.id}" title="Marquer comme voulue">${card.wanted ? '⭐' : '☆'}</button>`}
     <div class="card-info">
       <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
       <div class="card-name">${esc(card.name)}</div>
@@ -459,6 +630,286 @@ function recentCardItemHTML(card) {
       ${scanDate ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">🕐 ${scanDate}</div>` : ''}
     </div>
   </div>`;
+}
+
+function pricingCardItemHTML(card) {
+  const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
+  const priceLabel = card.marketPrice != null ? formatEuro(card.marketPrice) : 'N/A';
+  const pricedAt = card.lastPriceAt ? formatDateTime(card.lastPriceAt) : '';
+  return `<div class="card-item" data-id="${card.id}">
+    ${card.imageUrl
+      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    <div class="card-info">
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
+      <div class="card-name">${esc(card.name)}</div>
+      ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
+      <div style="font-size:.7rem;color:var(--accent);font-weight:700;margin-top:3px">${priceLabel}</div>
+      ${pricedAt ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">🕐 ${pricedAt}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function ownedPricingCardItemHTML(card) {
+  const rarityColor = RARITY_COLORS[card.rarity] || 'var(--text-muted)';
+  const setLabel = card.editionSetNumber ? `S${card.editionSetNumber}·` : '';
+  const regularQuantity = card.quantity || 0;
+  const foilQuantity = card.foilQuantity || 0;
+  return `<div class="card-item owned" data-id="${card.id}">
+    ${card.imageUrl
+      ? `<img src="${esc(card.imageUrl)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'" />`
+      : `<div style="width:100%;aspect-ratio:600/840;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.5rem">🃏</div>`}
+    <div class="owned-badge">${regularQuantity + foilQuantity}</div>
+    <div class="card-info">
+      <div class="card-number">${setLabel}#${esc(card.cardNumber)}</div>
+      <div class="card-name">${esc(card.name)}</div>
+      ${card.rarity ? `<div class="card-rarity" style="color:${rarityColor}">${esc(card.rarity)}</div>` : ''}
+      <div style="font-size:.7rem;color:var(--accent);font-weight:700;margin-top:3px">${formatEuro(card.marketPrice)}</div>
+      <div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">Normal : ${regularQuantity} · Foil : ${foilQuantity}</div>
+    </div>
+  </div>`;
+}
+
+function renderOwnedPricingRanking() {
+  const area = document.getElementById('ownedPricingRanking');
+  if (!area) return;
+  const visibleCards = ownedPricingCardsState.slice(0, ownedPricingLimit);
+  area.innerHTML = visibleCards.length === 0
+    ? `<div class="empty-state" style="padding:24px 8px"><h3>Aucune carte possédée valorisée</h3><p>Le top s'affichera après les premières mises à jour de prix en EUR.</p></div>`
+    : `<div class="cards-grid">${visibleCards.map(c => ownedPricingCardItemHTML(c)).join('')}</div>`;
+  area.querySelectorAll('.card-item[data-id]').forEach(el => {
+    el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
+  });
+}
+
+function renderPricingPage() {
+  document.getElementById('app').innerHTML = `
+    <div class="app">
+      <div class="page">
+        <div class="page-header"><h1>💶 Prix</h1></div>
+        <div id="pricingTabContent">${loadingHTML()}</div>
+      </div>
+      ${navHTML('pricing')}
+    </div>
+    <div id="modalArea"></div>`;
+
+  loadPricingData();
+}
+
+function loadPricingData() {
+  return api.getPricingInsights().then(data => {
+    pricingCardsState = data.latestPricedCards || [];
+    ownedPricingCardsState = data.ownedCardPriceRanking || [];
+    const editionRows = (data.editionValuations || []).map(e => `
+      <div class="edition-item">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h3>${esc(e.editionName || '')}</h3>
+            <div class="edition-code">${esc(e.editionCode || '')}</div>
+          </div>
+          <span style="color:var(--accent);font-weight:700">${formatEuro(e.totalValueEur || 0)}</span>
+        </div>
+        <div style="margin-top:8px;padding:6px 8px;border-radius:8px;background:var(--bg-card2);font-size:.78rem;">
+          <div style="color:var(--text-muted)">Coût des cartes manquantes (Courantes et Légendaire)</div>
+          <div style="margin-top:4px;font-weight:700">${formatEuro(e.completionCostBaseEur || 0)}</div>
+        </div>
+        ${e.missingCardsUnknownPrice > 0
+          ? `<div style="margin-top:6px;font-size:.72rem;color:var(--warning)">⚠ prix inconnu pour ${e.missingCardsUnknownPrice} carte${e.missingCardsUnknownPrice > 1 ? 's' : ''}, coût minoré</div>`
+          : ''}
+      </div>`).join('');
+
+    const content = document.getElementById('pricingTabContent');
+    if (!content) return;
+
+    content.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">${formatEuro(data.totalCollectionValueEur || 0)}</div>
+          <div class="stat-label">Valeur totale (EUR)</div>
+          <button class="btn btn-ghost" id="recomputeValueBtn" style="margin-top:8px;padding:4px 10px;font-size:.78rem">🔄 Recalculer</button>
+        </div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${data.excludedNoPrice ?? 0}</div><div class="stat-label">Exclues sans prix</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${data.excludedNonEur ?? 0}</div><div class="stat-label">Exclues non EUR</div></div>
+      </div>
+
+      <div class="chart-container" style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+          <h3>Top de mes cartes par prix unitaire</h3>
+          <div class="filter-bar" id="ownedPricingLimitBar" style="margin:0">
+            ${[20, 50, 100].map(limit => `<button class="filter-chip${ownedPricingLimit === limit ? ' active' : ''}" data-limit="${limit}">${limit}</button>`).join('')}
+          </div>
+        </div>
+        <div id="ownedPricingRanking"></div>
+      </div>
+
+      <div class="chart-container" style="margin:10px 0 16px">
+        <h3>Évolution de la valeur totale de la collection</h3>
+        <div style="height:220px"><canvas id="collectionTrendChart"></canvas></div>
+        <details id="collectionTrendHistory" style="margin-top:10px">
+          <summary style="cursor:pointer;color:var(--text-muted);font-size:.82rem">Historique détaillé</summary>
+          <div id="collectionTrendHistoryTable" style="margin-top:8px"></div>
+        </details>
+      </div>
+
+      <div style="padding:0 12px 4px">
+        <h3 style="color:var(--text-muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Tendance par édition (Δ 7j / 30j)</h3>
+        <div id="editionDeltaTable" aria-live="polite"></div>
+      </div>
+
+      <div style="padding:0 12px 4px">
+        <h3 style="color:var(--text-muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Valeur par édition suivie</h3>
+        ${editionRows || `<div class="empty-state" style="padding:24px 8px"><h3>Aucune édition suivie</h3><p>Activez des sets dans l'administration pour voir les valorisations.</p></div>`}
+      </div>
+
+      <div class="chart-container" style="margin:10px 0 16px">
+        <h3>20 dernières cartes du catalogue valorisées</h3>
+        ${pricingCardsState.length === 0
+          ? `<div class="empty-state" style="padding:24px 8px"><h3>Aucune carte valorisée</h3><p>La liste s'affichera après les premières mises à jour de prix en EUR.</p></div>`
+          : `<div class="cards-grid">${pricingCardsState.map(c => pricingCardItemHTML(c)).join('')}</div>`}
+      </div>`;
+
+    renderOwnedPricingRanking();
+    document.getElementById('ownedPricingLimitBar').addEventListener('click', event => {
+      const button = event.target.closest('[data-limit]');
+      if (!button) return;
+      ownedPricingLimit = parseInt(button.dataset.limit, 10);
+      document.querySelectorAll('#ownedPricingLimitBar .filter-chip').forEach(chip =>
+        chip.classList.toggle('active', parseInt(chip.dataset.limit, 10) === ownedPricingLimit)
+      );
+      renderOwnedPricingRanking();
+    });
+
+    content.querySelectorAll('.card-item[data-id]').forEach(el => {
+      el.addEventListener('click', () => openModal(parseInt(el.dataset.id, 10)));
+    });
+
+    const recomputeBtn = document.getElementById('recomputeValueBtn');
+    if (recomputeBtn) {
+      recomputeBtn.addEventListener('click', () => {
+        recomputeBtn.disabled = true;
+        recomputeBtn.textContent = '⏳ Recalcul…';
+        api.recomputeValue()
+          .then(() => {
+            showToast('Snapshot mis à jour');
+            return loadPricingData();
+          })
+          .catch(err => {
+            const detail = err.rootCause && err.rootCause !== err.message ? ` (${err.rootCause})` : '';
+            showToast(`Échec du recalcul : ${err.message}${detail}`, { error: true, duration: 6000 });
+            recomputeBtn.disabled = false;
+            recomputeBtn.textContent = '🔄 Recalculer';
+          });
+      });
+    }
+
+    return Promise.all([
+      api.getTrend(),
+      api.getEditionDeltas(),
+    ]);
+  }).then(([trendData, editionDeltaData]) => {
+    const trendPoints = Array.isArray(trendData?.trend) ? trendData.trend : [];
+    const chartEl = document.getElementById('collectionTrendChart');
+    if (chartEl && trendPoints.length > 0) {
+      const labels = trendPoints.map(p => {
+        const d = new Date(p.recordedAt);
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+      });
+      const values = trendPoints.map(p => Number(p.totalCollectionValueEur ?? 0));
+
+      new Chart(chartEl, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Valeur totale (EUR)',
+            data: values,
+            borderColor: '#7fb3ff',
+            backgroundColor: 'rgba(127,179,255,0.18)',
+            borderWidth: 2,
+            pointRadius: 3,
+            fill: true,
+            tension: 0.22,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'nearest', intersect: false },
+          plugins: { legend: { labels: { color: '#e8eaf6' } } },
+          scales: {
+            x: {
+              ticks: { color: '#90a4ae' },
+              grid: { color: '#2d4060' },
+            },
+            y: {
+              ticks: { color: '#90a4ae', callback: value => `${value}€` },
+              grid: { color: '#2d4060' },
+            },
+          },
+        },
+      });
+    }
+
+    const historyTableEl = document.getElementById('collectionTrendHistoryTable');
+    if (historyTableEl) {
+      const rows = trendPoints.slice().reverse().map(p => `
+        <div class="edition-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px">
+          <span style="color:var(--text-muted);font-size:.82rem">${esc(new Date(p.recordedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }))}</span>
+          <span style="font-weight:700">${formatEuro(p.totalCollectionValueEur || 0)}</span>
+          <button class="btn btn-ghost" data-trend-point-id="${p.id}" style="padding:2px 8px;font-size:.78rem" title="Supprimer ce point">🗑️</button>
+        </div>`).join('');
+      historyTableEl.innerHTML = rows || `<div class="empty-state" style="padding:12px 8px"><p>Aucun historique disponible.</p></div>`;
+      historyTableEl.querySelectorAll('[data-trend-point-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const snapshotId = btn.dataset.trendPointId;
+          if (!confirm('Supprimer définitivement ce point de la courbe de valeur ? Cette action est irréversible.')) return;
+          btn.disabled = true;
+          api.deleteTrendPoint(snapshotId)
+            .then(() => {
+              showToast('Point supprimé');
+              return loadPricingData();
+            })
+            .catch(err => {
+              showToast(`Échec de la suppression : ${err.message}`, { error: true, duration: 6000 });
+              btn.disabled = false;
+            });
+        });
+      });
+    }
+
+    const tableEl = document.getElementById('editionDeltaTable');
+    if (tableEl) {
+      const rows = (Array.isArray(editionDeltaData) ? editionDeltaData : []).map(e => `
+        <div class="edition-item">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div>
+              <h3>${esc(e.editionName || e.editionCode || 'Édition')}</h3>
+              <div class="edition-code">${esc(e.editionCode || '')}</div>
+            </div>
+            <span style="color:var(--accent);font-weight:700">${formatEuro(e.currentValueEur || 0)}</span>
+          </div>
+          <div style="margin-top:8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;font-size:.78rem;">
+            <div style="padding:6px 8px;border-radius:8px;background:var(--bg-card2);">
+              <div style="color:var(--text-muted)">7 jours</div>
+              <div style="margin-top:4px; font-weight:700; color:${percentTone(e.delta7dPercent)}">${formatSignedPercent(e.delta7dPercent)}</div>
+              <div style="color:var(--text-muted)">${e.value7dEur != null ? formatEuro(e.value7dEur) : '—'}</div>
+            </div>
+            <div style="padding:6px 8px;border-radius:8px;background:var(--bg-card2);">
+              <div style="color:var(--text-muted)">30 jours</div>
+              <div style="margin-top:4px; font-weight:700; color:${percentTone(e.delta30dPercent)}">${formatSignedPercent(e.delta30dPercent)}</div>
+              <div style="color:var(--text-muted)">${e.value30dEur != null ? formatEuro(e.value30dEur) : '—'}</div>
+            </div>
+          </div>
+        </div>`).join('');
+
+      tableEl.innerHTML = rows || `<div class="empty-state" style="padding:24px 8px"><h3>Aucune donnée historique</h3><p>Les snapshots de valeur seront ajoutés après les prochaines synchronisations de prix.</p></div>`;
+    }
+  }).catch(err => {
+    const content = document.getElementById('pricingTabContent');
+    if (!content) return;
+    content.innerHTML = `<div class="empty-state"><h3>Erreur</h3><p>${esc(err.message)}</p></div>`;
+  });
 }
 
 function renderRecentScansPage() {
@@ -523,7 +974,9 @@ function renderRecentScansSection() {
 
 function openModal(cardId) {
   const card = collState.cards.find(c => c.id === cardId)
-             || recentCardsState.find(c => c.id === cardId);
+             || recentCardsState.find(c => c.id === cardId)
+             || ownedPricingCardsState.find(c => c.id === cardId)
+             || pricingCardsState.find(c => c.id === cardId);
   if (!card) return;
   collState.modal = card;
 
@@ -545,6 +998,10 @@ function openModal(cardId) {
           <h2 class="modal-card-name">${esc(card.name)}</h2>
           ${card.rarity
             ? `<div style="font-size:.85rem;font-weight:600;margin-bottom:12px;color:${RARITY_COLORS[card.rarity]||'var(--text-muted)'}">${esc(card.rarity)}</div>`
+            : ''}
+          ${priceMetadataHTML(card)}
+          ${card.owned && card.marketPrice != null && ownedPricingCardsState.some(c => c.id === card.id)
+            ? `<button class="btn btn-ghost btn-full" id="removeCardPriceBtn" style="margin-top:10px">Supprimer le prix</button>`
             : ''}
 
           <div class="modal-qty-section">
@@ -586,6 +1043,20 @@ function openModal(cardId) {
   });
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
   document.getElementById('modalContent').addEventListener('click', e => e.stopPropagation());
+
+  const removeCardPriceButton = document.getElementById('removeCardPriceBtn');
+  if (removeCardPriceButton) {
+    removeCardPriceButton.addEventListener('click', async () => {
+      if (!window.confirm(`Supprimer le prix de "${card.name}" ? Les quantités possédées ne seront pas modifiées.`)) return;
+      try {
+        await api.removeCardPrice(card.id);
+        closeModal();
+        renderPricingPage();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  }
 
   if (card.owned) {
     document.getElementById('qtyMinus').addEventListener('click', () => updateQtyRegular(card.id, card.quantity - 1));
@@ -757,7 +1228,8 @@ async function updateQty(cardId, qty) {
 async function updateQtyRegular(cardId, qty) {
   const sourceCard = collState.cards.find(c => c.id === cardId)
                   || (collState.modal?.id === cardId ? collState.modal : null)
-                  || recentCardsState.find(c => c.id === cardId);
+                  || recentCardsState.find(c => c.id === cardId)
+                  || pricingCardsState.find(c => c.id === cardId);
   if (!sourceCard) return;
   const foilQty = sourceCard.foilQuantity || 0;
   let updated;
@@ -768,6 +1240,7 @@ async function updateQtyRegular(cardId, qty) {
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
+  pricingCardsState = pricingCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
   renderRecentScansSection();
@@ -777,7 +1250,8 @@ async function updateQtyRegular(cardId, qty) {
 async function updateQtyFoiled(cardId, qty) {
   const sourceCard = collState.cards.find(c => c.id === cardId)
                   || (collState.modal?.id === cardId ? collState.modal : null)
-                  || recentCardsState.find(c => c.id === cardId);
+                  || recentCardsState.find(c => c.id === cardId)
+                  || pricingCardsState.find(c => c.id === cardId);
   if (!sourceCard) return;
   const regQty = sourceCard.quantity || 0;
   let updated;
@@ -788,6 +1262,7 @@ async function updateQtyFoiled(cardId, qty) {
   }
   collState.cards = collState.cards.map(c => c.id === updated.id ? updated : c);
   recentCardsState = recentCardsState.map(c => c.id === updated.id ? updated : c);
+  pricingCardsState = pricingCardsState.map(c => c.id === updated.id ? updated : c);
   collState.modal = updated;
   renderCards();
   renderRecentScansSection();
@@ -795,6 +1270,101 @@ async function updateQtyFoiled(cardId, qty) {
 }
 
 // ─── STATISTICS ───────────────────────────────────────────────────────────────
+
+const INK_COLORS = ['Ambre', 'Améthyste', 'Émeraude', 'Rubis', 'Saphir', 'Acier'];
+const RARITY_ORDER = ['Commune', 'Inhabituelle', 'Rare', 'Très Rare', 'Légendaire'];
+
+function normalizeIconName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '');
+}
+
+// <img> with a text fallback shown if the icon file fails to load (accessibility + resilience)
+function iconWithFallback(src, label, sizePx) {
+  return `<span>
+    <img src="${src}" alt="${esc(label)}" title="${esc(label)}"
+      style="width:${sizePx}px;height:${sizePx}px;vertical-align:middle"
+      onerror="this.style.display='none';this.nextElementSibling.style.display='inline'" />
+    <span style="display:none;font-size:.75rem">${esc(label)}</span>
+  </span>`;
+}
+
+// preloaded once so Chart.js can draw them as x-axis tick icons (see rarityIconTicksPlugin)
+const RARITY_ICON_IMAGES = {};
+RARITY_ORDER.forEach(r => {
+  const img = new Image();
+  img.src = `icons/rarity/${normalizeIconName(r)}.png`;
+  RARITY_ICON_IMAGES[r] = img;
+});
+
+const rarityIconTicksPlugin = {
+  id: 'rarityIconTicks',
+  afterDraw(chart) {
+    const xScale = chart.scales?.x;
+    if (!xScale) return;
+    const ctx = chart.ctx;
+    const labels = chart.data.labels || [];
+    const size = 20;
+    labels.forEach((label, i) => {
+      const img = RARITY_ICON_IMAGES[label];
+      if (!img || !img.complete || img.naturalWidth === 0) return;
+      const x = xScale.getPixelForTick(i);
+      ctx.drawImage(img, x - size / 2, xScale.bottom + 6, size, size);
+    });
+  },
+};
+
+function buildMissingByColorTable(stats) {
+  const editionsWithMissing = (stats.byEdition || []).filter(e => e.missingCards > 0);
+  if (editionsWithMissing.length === 0) return '';
+
+  const headerCells = INK_COLORS.map(color => `
+    <th style="text-align:center;padding:8px 10px">${iconWithFallback(`icons/ink/${normalizeIconName(color)}.png`, color, 26)}</th>`).join('');
+
+  const rows = editionsWithMissing.map(e => {
+    const missingByColor = e.missingByColor || [];
+    const cells = INK_COLORS.map(color => {
+      const entry = missingByColor.find(m => m.inkColor === color);
+      const ordered = entry
+        ? RARITY_ORDER.map(r => (entry.byRarity || []).find(rc => rc.rarity === r)).filter(Boolean)
+        : [];
+      if (ordered.length === 0) {
+        return '<td style="text-align:center;color:var(--text-muted);border-bottom:1px solid var(--border)">—</td>';
+      }
+      const total = ordered.reduce((sum, rc) => sum + rc.missingCards, 0);
+      const pills = ordered.map(rc => `
+        <span style="display:inline-flex;align-items:center;gap:3px;margin:1px 4px 1px 0;white-space:nowrap">
+          ${iconWithFallback(`icons/rarity/${normalizeIconName(rc.rarity)}.png`, rc.rarity, 14)}
+          <span style="font-size:.78rem">${rc.missingCards}</span>
+        </span>`).join('');
+      return `<td style="border-bottom:1px solid var(--border)">${pills}<span style="display:block;margin-top:4px;font-size:.75rem;color:var(--text-muted)">(=${total})</span></td>`;
+    }).join('');
+    return `<tr>
+      <td style="font-weight:700;white-space:nowrap;padding:8px 10px;border-bottom:1px solid var(--border)">${esc(e.editionName)}</td>
+      ${cells}
+      <td style="text-align:center;font-weight:700;color:#ffca28;padding:8px 10px;border-bottom:1px solid var(--border)">${e.missingCards}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="chart-container">
+      <h3>Manquantes par édition</h3>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%;font-size:.85rem">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:8px 10px">Édition</th>
+              ${headerCells}
+              <th style="padding:8px 10px">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
 
 function renderStatistics() {
   document.getElementById('app').innerHTML = `
@@ -825,13 +1395,7 @@ function renderStatistics() {
         </div>
       </div>`).join('');
 
-    const rarityCharts = stats.byEdition
-      .filter(e => e.byRarity?.length > 0)
-      .map((e, i) => `
-        <div class="chart-container">
-          <h3>${esc(e.editionName || e.editionCode || `Set ${i + 1}`)}</h3>
-          <div style="height:180px"><canvas id="rarityChart${i}"></canvas></div>
-        </div>`).join('');
+    const missingByColorTable = buildMissingByColorTable(stats);
 
     content.innerHTML = `
       <div class="stats-grid">
@@ -862,7 +1426,7 @@ function renderStatistics() {
         <div style="height:220px"><canvas id="globalRarityBar"></canvas></div>
       </div>` : ''}
 
-      ${rarityCharts}`;
+      ${missingByColorTable}`;
 
     const legendColor = '#e8eaf6';
     const tickColor = '#90a4ae';
@@ -915,7 +1479,7 @@ function renderStatistics() {
       }
       const rarities = Object.keys(rarityMap);
       if (rarities.length > 0) {
-        new Chart(document.getElementById('globalRarityBar'), {
+        const globalRarityChart = new Chart(document.getElementById('globalRarityBar'), {
           type: 'bar',
           data: {
             labels: rarities,
@@ -924,24 +1488,22 @@ function renderStatistics() {
               { label: 'Manquantes', data: rarities.map(r => rarityMap[r].missing), backgroundColor: '#ef5350' },
             ],
           },
-          options: stackedOpts,
+          options: {
+            ...stackedOpts,
+            layout: { padding: { bottom: 26 } },
+            scales: {
+              ...stackedOpts.scales,
+              x: { ...stackedOpts.scales.x, ticks: { ...stackedOpts.scales.x.ticks, callback: () => '' } },
+            },
+          },
+          plugins: [rarityIconTicksPlugin],
+        });
+        // icons may still be loading on first render; redraw once each finishes
+        rarities.forEach(r => {
+          const img = RARITY_ICON_IMAGES[r];
+          if (img && !img.complete) img.onload = () => globalRarityChart.update();
         });
       }
-
-      // Per-edition rarity charts
-      stats.byEdition.filter(e => e.byRarity?.length > 0).forEach((e, i) => {
-        new Chart(document.getElementById(`rarityChart${i}`), {
-          type: 'bar',
-          data: {
-            labels: e.byRarity.map(r => r.rarity),
-            datasets: [
-              { label: 'Possédées', data: e.byRarity.map(r => r.ownedCards), backgroundColor: '#66bb6a' },
-              { label: 'Manquantes', data: e.byRarity.map(r => r.missingCards), backgroundColor: '#ef5350' },
-            ],
-          },
-          options: { ...stackedOpts, maintainAspectRatio: false },
-        });
-      });
     }
   });
 }
@@ -1090,6 +1652,26 @@ function canvasToBlob(canvas) {
 
 // ── Parsing du code Lorcana ───────────────────────────────────────────────────
 // Format : "N/TOTAL • LANG • SET"  ex : "1/204 • FR • 4"
+const DEFAULT_SCANNER_TOTAL_MAX = 500;
+let scannerTotalMax = DEFAULT_SCANNER_TOTAL_MAX;
+
+async function loadScannerSettings() {
+  try {
+    const settings = await api.getSettings();
+    const row = (settings || []).find(s => s.settingKey === 'scanner_total_max');
+    if (!row || row.settingValue == null) {
+      scannerTotalMax = DEFAULT_SCANNER_TOTAL_MAX;
+      return;
+    }
+    const parsed = parseInt(String(row.settingValue), 10);
+    scannerTotalMax = Number.isFinite(parsed) && parsed >= 2 && parsed <= 999
+      ? parsed
+      : DEFAULT_SCANNER_TOTAL_MAX;
+  } catch {
+    scannerTotalMax = DEFAULT_SCANNER_TOTAL_MAX;
+  }
+}
+
 function parseCardCode(rawText) {
   const text = rawText
     .toUpperCase()
@@ -1104,7 +1686,7 @@ function parseCardCode(rawText) {
   const cardNum = parseInt(m[1], 10);
   const total   = parseInt(m[2], 10);
   if (cardNum < 1 || cardNum > 999) return null;
-  if (total   < 2  || total   > 500) return null;
+  if (total   < 2  || total   > scannerTotalMax) return null;
   const after  = text.slice(text.indexOf(m[0]) + m[0].length);
   const langM  = after.match(/\b([A-Z]{2})\b/);
   let setNum = null;
@@ -1212,6 +1794,7 @@ function setScannerCameraVisible(visible) {
 }
 
 function restartScannerCapture() {
+  stopWantedCelebration();
   setScannerCameraVisible(true);
   setScanAlert('');
   setScanDebug([]);
@@ -1242,9 +1825,9 @@ function renderScanner() {
     </div>`;
 
   const cameraArea = document.getElementById('scanCameraArea');
-  navigator.mediaDevices?.getUserMedia({
+  loadScannerSettings().then(() => navigator.mediaDevices?.getUserMedia({
     video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-  })
+  }))
     .then(stream => {
       _cameraStream = stream;
       cameraArea.innerHTML = `
@@ -1440,10 +2023,12 @@ function renderCardConfirmation(card) {
   if (!area) return;
   setScanAlert('');
   setScanDebug([]);
+  if (card.wanted) celebrateWantedCardScan();
   const isNewCard = !card.owned;
+  const showWanted = card.wanted && !card.owned;
   const imgHtml = card.imageUrl
-    ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)" onerror="this.style.display='none'" />`
-    : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem">🃏</div>`;
+    ? `<img src="${esc(card.imageUrl)}" alt="" style="width:110px;border-radius:8px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)${showWanted ? ';border:2px solid #d4af37' : ''}" onerror="this.style.display='none'" />`
+    : `<div style="width:110px;height:154px;border-radius:8px;background:var(--bg-card2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.5rem${showWanted ? ';border:2px solid #d4af37' : ''}">🃏</div>`;
   const newCardBanner = isNewCard
     ? `<div style="background:#d32f2f;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:4px 8px;border-radius:6px;margin-bottom:6px;text-align:center">Nouvelle carte</div>`
     : '';
@@ -1458,10 +2043,14 @@ function renderCardConfirmation(card) {
           ${imgHtml}
         </div>
         <div style="flex:1">
-          <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div style="font-weight:800;font-size:1rem;line-height:1.3">${esc(card.name)}</div>
+            <button class="wanted-toggle${card.wanted ? ' active' : ''}" id="confirmWantedToggleBtn" title="Marquer comme voulue">${card.wanted ? '⭐' : '☆'}</button>
+          </div>
           <div style="font-size:.78rem;color:var(--primary-light);font-weight:700;margin-top:4px">${esc(card.editionCode)}</div>
           <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px">#${esc(String(card.cardNumber))} · ${esc(card.rarity)}</div>
           ${ownedInfo}
+          ${priceMetadataHTML(card)}
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:16px;flex-direction:column">
@@ -1483,7 +2072,42 @@ function renderCardConfirmation(card) {
     restartScannerCapture();
   });
   document.getElementById('restartScanBtn').addEventListener('click', restartScannerCapture);
+  document.getElementById('confirmWantedToggleBtn').addEventListener('click', async () => {
+    const updated = await api.setWanted(card.id, !card.wanted);
+    card.wanted = updated.wanted;
+    renderCardConfirmation(card);
+  });
 }
+
+// Overlay non-bloquant de confettis, déclenché à la reconnaissance d'une carte voulue.
+// Tourne en boucle jusqu'à stopWantedCelebration() (relance du scan).
+let _wantedCelebrationOverlay = null;
+
+function celebrateWantedCardScan() {
+  stopWantedCelebration();
+  const overlay = document.createElement('div');
+  overlay.className = 'confetti-overlay';
+  const colors = ['#d4af37', '#ff6f61', '#4fc3f7', '#81c784', '#ba68c8', '#ffd54f'];
+  for (let i = 0; i < 40; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.animationDelay = `${Math.random() * 1.6}s`;
+    piece.style.animationDuration = `${1.1 + Math.random() * 0.6}s`;
+    overlay.appendChild(piece);
+  }
+  document.body.appendChild(overlay);
+  _wantedCelebrationOverlay = overlay;
+}
+
+function stopWantedCelebration() {
+  if (_wantedCelebrationOverlay) {
+    _wantedCelebrationOverlay.remove();
+    _wantedCelebrationOverlay = null;
+  }
+}
+
 
 function renderFoundCards(cards) {
   const area = document.getElementById('foundCardsArea');
@@ -1599,7 +2223,7 @@ function updateAdminProgress(p) {
 }
 
 function setSyncBusy(busy) {
-  ['syncUrlBtn'].forEach(id => {
+  ['syncUrlBtn', 'pricingRunBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = busy;
   });
@@ -1614,7 +2238,10 @@ function renderAdmin() {
     <div class="app">
       <div class="page">
         <div class="page-header">
-          <h1>⚙️ Administration</h1>
+          <div>
+            <h1>⚙️ Administration</h1>
+            <span class="build-identity" id="buildIdentity">Version indisponible</span>
+          </div>
           <button class="btn btn-ghost" id="logoutBtn" style="margin-left:auto;font-size:.8rem;padding:6px 12px">Déconnexion</button>
         </div>
         <div id="adminContent" style="padding:12px">${loadingHTML()}</div>
@@ -1631,10 +2258,42 @@ function renderAdmin() {
     navigate('login');
   });
 
-  Promise.all([api.getSettings(), api.getLorcaJsonUrl(), api.getProgress(), api.getEditions()]).then(([settings, urlData, progressData, editions]) => {
+  Promise.all([
+    api.getSettings(),
+    api.getLorcaJsonUrl(),
+    api.getProgress(),
+    api.getEditions(),
+    api.getPricingStatus().catch(() => null),
+    api.getBuildIdentity().catch(() => null),
+  ]).then(([settings, urlData, progressData, editions, pricingStatus, buildIdentity]) => {
+    const buildIdentityElement = document.getElementById('buildIdentity');
+    if (buildIdentityElement && buildIdentity?.version && buildIdentity?.commit) {
+      buildIdentityElement.textContent = `${buildIdentity.version} - ${buildIdentity.commit}`;
+    }
+
     const content = document.getElementById('adminContent');
     if (!content) return;
     const currentUrl = urlData.url || 'https://lorcanajson.org/files/current/fr/allCards.json';
+    const settingVal = (key, fallback = '') => {
+      const row = settings.find(s => s.settingKey === key);
+      return row && row.settingValue != null ? String(row.settingValue) : fallback;
+    };
+    const pricingSyncEnabled = settingVal('pricing_sync_enabled', 'true');
+    const pricingLogHighPriceEnabled = settingVal('pricing_log_high_price_enabled', 'true');
+    const pricingLogHighPriceThreshold = settingVal('pricing_log_high_price_threshold', '5');
+    const pricingLogUnresolvedMappingEnabled = settingVal('pricing_log_unresolved_mapping_enabled', 'false');
+    const pricingLogAbnormalPriceEnabled = settingVal('pricing_log_abnormal_price_enabled', 'false');
+    const pricingLogAbnormalPriceThreshold = settingVal('pricing_log_abnormal_price_threshold', '5');
+    const pricingLogAbnormalPriceRarities = settingVal('pricing_log_abnormal_price_rarities', 'Common,Uncommon,rare,Super_rare');
+    const pricingDailyHardLimit = settingVal('pricing_daily_hard_limit', settingVal('pricing_daily_budget', '100'));
+    const pricingDailySafetyMargin = settingVal('pricing_daily_safety_margin', '5');
+    const pricingMinuteLimit = settingVal('pricing_minute_limit', '30');
+    const pricingProviderHost = settingVal('pricing_provider_host', 'lorcana-api-by-tcggo.p.rapidapi.com');
+    const pricingProviderEpisodesPath = settingVal('pricing_provider_episodes_path', '/episodes');
+    const pricingProviderEpisodeCardsPathTemplate = settingVal('pricing_provider_episode_cards_path_template', '/episodes/{episodeId}/cards');
+    const pricingProviderCurrency = settingVal('pricing_provider_currency', 'EUR');
+    const pricingProviderApiKey = settingVal('pricing_provider_api_key', '');
+    const pricingScheduleCron = settingVal('pricing_schedule_cron', '0 0 2 * * *');
 
     const statsSetsSetting = settings.find(s => s.settingKey === 'stats_enabled_sets');
     const savedStatsSetIds = statsSetsSetting
@@ -1674,6 +2333,162 @@ function renderAdmin() {
       <!-- Progression -->
       <div id="adminProgressBox" class="edition-item" style="margin-bottom:12px;display:none"></div>
 
+      <!-- Pricing sync -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">💶 Synchronisation des prix</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Limites strictes: jamais plus de 100 appels/jour et jamais plus de 30 appels/minute. Priorité: sans prix, prix > 7 jours, puis le reste.
+        </p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Sync activée</span>
+            <select id="pricingSyncEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingSyncEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingSyncEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Hard cap journalier (max 100)</span>
+            <input id="pricingDailyHardLimit" type="number" min="0" max="100" value="${esc(pricingDailyHardLimit)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Log "High market price"</span>
+            <select id="pricingLogHighPriceEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingLogHighPriceEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingLogHighPriceEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Seuil "High market price" (EUR)</span>
+            <input id="pricingLogHighPriceThreshold" type="number" min="0" value="${esc(pricingLogHighPriceThreshold)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Log diagnostic "Unresolved mapping"</span>
+            <select id="pricingLogUnresolvedMappingEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingLogUnresolvedMappingEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingLogUnresolvedMappingEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Alerte "Prix anormal" (rareté basse)</span>
+            <select id="pricingLogAbnormalPriceEnabled" style="width:100%;border-radius:8px;padding:8px 10px;background:var(--bg-input,var(--bg-card2));border:1px solid var(--border);color:var(--text)">
+              <option value="true" ${pricingLogAbnormalPriceEnabled === 'true' ? 'selected' : ''}>Oui</option>
+              <option value="false" ${pricingLogAbnormalPriceEnabled === 'false' ? 'selected' : ''}>Non</option>
+            </select>
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Seuil "Prix anormal" (EUR)</span>
+            <input id="pricingLogAbnormalPriceThreshold" type="number" min="0" value="${esc(pricingLogAbnormalPriceThreshold)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Raretés surveillées (séparées par virgule)</span>
+            <input id="pricingLogAbnormalPriceRarities" type="text" value="${esc(pricingLogAbnormalPriceRarities)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Marge de sécurité quotidienne</span>
+            <input id="pricingDailySafetyMargin" type="number" min="0" max="100" value="${esc(pricingDailySafetyMargin)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Limite minute (max 30)</span>
+            <input id="pricingMinuteLimit" type="number" min="1" max="30" value="${esc(pricingMinuteLimit)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Provider host</span>
+            <input id="pricingProviderHost" type="text" value="${esc(pricingProviderHost)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Provider episodes path</span>
+            <input id="pricingProviderEpisodesPath" type="text" value="${esc(pricingProviderEpisodesPath)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Provider episode cards path template</span>
+            <input id="pricingProviderEpisodeCardsPathTemplate" type="text" value="${esc(pricingProviderEpisodeCardsPathTemplate)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Devise cible</span>
+            <input id="pricingProviderCurrency" type="text" value="${esc(pricingProviderCurrency)}"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">Cron quotidien</span>
+            <input id="pricingScheduleCron" type="text" value="${esc(pricingScheduleCron)}"
+              placeholder="0 0 2 * * *"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted)">
+            <span style="display:block;margin-bottom:4px">API key RapidAPI</span>
+            <input id="pricingProviderApiKey" type="password" value="${esc(pricingProviderApiKey)}"
+              placeholder="Renseigner la clé provider"
+              style="width:100%;border-radius:8px;padding:8px 10px" />
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+          <button class="btn btn-accent" id="pricingSaveBtn">💾 Enregistrer</button>
+          <button class="btn btn-ghost" id="pricingRefreshStatusBtn">🔄 Rafraîchir statut</button>
+          <button class="btn btn-ghost" id="pricingRunBtn">▶️ Lancer maintenant</button>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <label style="font-size:.84rem;color:var(--text-muted);margin:0">Max appels run manuel</label>
+          <input id="pricingMaxAttempts" type="number" min="1" placeholder="illimité"
+            style="width:120px;border-radius:8px;padding:6px 8px" />
+        </div>
+
+        <div id="pricingStatusBox" style="font-size:.84rem;color:var(--text-muted);background:var(--bg-card2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px"></div>
+        <div id="pricingSettingsResult"></div>
+      </div>
+
+      <!-- Simulation import prix (temporaire, à retirer après validation) -->
+      <div class="edition-item" style="margin-bottom:12px;border:1px dashed var(--accent)">
+        <h3 style="margin-bottom:8px">🧪 Simulation import prix (temporaire)</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Collez ici la réponse JSON brute de l'API pricing (par exemple <code>/episodes/{id}/cards</code>) pour appliquer
+          les prix aux cartes locales <strong>sans appeler l'API</strong> et sans consommer de budget d'appels.
+        </p>
+        <textarea id="pricingSimulateJson" rows="8" placeholder='{"data":[{"card_number":143,"episode":{"code":"11WSP"},"prices":{...}}]}'
+          style="width:100%;border-radius:8px;font-family:monospace;font-size:.8rem;padding:8px"></textarea>
+        <button class="btn btn-accent btn-full" id="pricingSimulateBtn" style="margin-top:8px">▶️ Appliquer les prix depuis ce JSON</button>
+        <div id="pricingSimulateResult" style="margin-top:8px"></div>
+      </div>
+
       <!-- Sauvegarde / Restauration complètes -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">💾 Sauvegarde &amp; Restauration complètes</h3>
@@ -1689,11 +2504,25 @@ function renderAdmin() {
         <div id="fullBackupResult" style="margin-top:8px"></div>
       </div>
 
+      <!-- Dreamborn Export -->
+      <div class="edition-item" style="margin-bottom:12px">
+        <h3 style="margin-bottom:12px">Export Dreamborn.ink</h3>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
+          Téléchargez votre collection au format CSV pour créer un deck dans Dreamborn.ink.
+        </p>
+        <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--text-muted);margin:0 0 10px;cursor:pointer">
+          <input type="checkbox" id="dreambornReserve" checked style="accent-color:var(--accent)" />
+          Conserver un exemplaire en réserve (foil prioritaire)
+        </label>
+        <button class="btn btn-accent btn-full" id="dreambornExportBtn">⬇️ Télécharger l'export Dreamborn (.csv)</button>
+        <div id="dreambornExportResult" style="margin-top:8px"></div>
+      </div>
+
       <!-- Companion Import -->
       <div class="edition-item" style="margin-bottom:12px">
         <h3 style="margin-bottom:12px">Import depuis Lorcana Companion</h3>
         <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:12px">
-          Importez un export Companion (clé <strong>OwnedCardQuantitiesV2</strong>). Les quantités Regular et Foiled sont additionnées.
+          Importez un export Companion (clé <strong>OwnedCardQuantitiesV2</strong>). Les quantités Regular et Foiled sont traitées séparément, en mode fusion ou remplacement.
         </p>
         <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--text-muted);margin:0 0 10px;cursor:pointer">
           <input type="checkbox" id="companionMergeMode" checked style="accent-color:var(--accent)" />
@@ -1787,6 +2616,156 @@ function renderAdmin() {
       setSyncBusy(true);
       startSyncPoll();
     }
+
+    function renderPricingStatus(status) {
+      const box = document.getElementById('pricingStatusBox');
+      if (!box) return;
+      if (!status) {
+        box.innerHTML = 'Statut pricing indisponible.';
+        return;
+      }
+      const lines = [
+        `Sync activée: ${status.syncEnabled ? 'oui' : 'non'}`,
+        `Hard cap: ${status.dailyHardLimit ?? 0}`,
+        `Marge sécurité: ${status.dailySafetyMargin ?? 0}`,
+        `Budget effectif: ${status.effectiveDailyBudget ?? status.dailyBudget ?? 0}`,
+        `Consommé: ${status.usedAttempts ?? 0}`,
+        `Restant: ${status.remainingAttempts ?? 0}`,
+        `Limite minute (effective): ${status.minuteLimit ?? 30}`,
+        `Date usage: ${esc(status.usageDate ?? '')}`,
+        `Cron configuré: ${esc(status.scheduleCron ?? '')}`,
+        `Cron effectif: ${esc(status.scheduleEffectiveCron ?? '')}`,
+        `Cron valide: ${status.scheduleValid ? 'oui' : 'non (fallback)'}`,
+        `Prochain run: ${esc(status.scheduleNextRun ?? '')}`,
+        `Dernier run planifié: ${esc(status.lastScheduledRunDate ?? '')}`,
+        `Provider: ${esc(status.provider ?? '')}`,
+        `Provider configuré: ${status.providerConfigured ? 'oui' : 'non'}`,
+        `Episodes path: ${esc(status.providerEpisodesPath ?? '')}`,
+        `Episode cards path: ${esc(status.providerEpisodeCardsPathTemplate ?? '')}`,
+        `En cours: ${status.running ? 'oui' : 'non'}`,
+        `Queue sans prix: ${status.queueWithoutPrice ?? 0}`,
+        `Queue stale > 7j: ${status.queueStaleOver7Days ?? 0}`,
+        `Queue avec prix: ${status.queueWithPrice ?? 0}`,
+        `Curseur: ${esc(JSON.stringify(status.cursor || {}))}`,
+        `Dernier stop: ${esc(status.lastStopReason ?? status.stopReason ?? '')}`,
+      ];
+      box.innerHTML = lines.map(line => `<div>${line}</div>`).join('');
+    }
+
+    async function refreshPricingStatus() {
+      try {
+        const status = await api.getPricingStatus();
+        renderPricingStatus(status);
+      } catch (err) {
+        showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur statut pricing : ' + err.message });
+      }
+    }
+
+    renderPricingStatus(pricingStatus);
+
+    document.getElementById('pricingRefreshStatusBtn').addEventListener('click', refreshPricingStatus);
+
+    document.getElementById('pricingSaveBtn').addEventListener('click', async () => {
+      const syncEnabled = document.getElementById('pricingSyncEnabled').value;
+      const logHighPriceEnabled = document.getElementById('pricingLogHighPriceEnabled').value;
+      const logHighPriceThreshold = document.getElementById('pricingLogHighPriceThreshold').value.trim();
+      const logUnresolvedMappingEnabled = document.getElementById('pricingLogUnresolvedMappingEnabled').value;
+      const logAbnormalPriceEnabled = document.getElementById('pricingLogAbnormalPriceEnabled').value;
+      const logAbnormalPriceThreshold = document.getElementById('pricingLogAbnormalPriceThreshold').value.trim();
+      const logAbnormalPriceRarities = document.getElementById('pricingLogAbnormalPriceRarities').value.trim();
+      const dailyHardLimit = document.getElementById('pricingDailyHardLimit').value.trim();
+      const dailySafetyMargin = document.getElementById('pricingDailySafetyMargin').value.trim();
+      const minuteLimit = document.getElementById('pricingMinuteLimit').value.trim();
+      const providerHost = document.getElementById('pricingProviderHost').value.trim();
+      const providerEpisodesPath = document.getElementById('pricingProviderEpisodesPath').value.trim();
+      const providerEpisodeCardsPathTemplate = document.getElementById('pricingProviderEpisodeCardsPathTemplate').value.trim();
+      const providerCurrency = document.getElementById('pricingProviderCurrency').value.trim();
+      const scheduleCron = document.getElementById('pricingScheduleCron').value.trim();
+      const providerApiKey = document.getElementById('pricingProviderApiKey').value.trim();
+
+      try {
+        await Promise.all([
+          api.updateSetting('pricing_sync_enabled', syncEnabled),
+          api.updateSetting('pricing_log_high_price_enabled', logHighPriceEnabled),
+          api.updateSetting('pricing_log_high_price_threshold', logHighPriceThreshold || '5'),
+          api.updateSetting('pricing_log_unresolved_mapping_enabled', logUnresolvedMappingEnabled),
+          api.updateSetting('pricing_log_abnormal_price_enabled', logAbnormalPriceEnabled),
+          api.updateSetting('pricing_log_abnormal_price_threshold', logAbnormalPriceThreshold || '5'),
+          api.updateSetting('pricing_log_abnormal_price_rarities', logAbnormalPriceRarities || 'Common,Uncommon,rare,Super_rare'),
+          api.updateSetting('pricing_daily_hard_limit', dailyHardLimit || '100'),
+          api.updateSetting('pricing_daily_budget', dailyHardLimit || '100'),
+          api.updateSetting('pricing_daily_safety_margin', dailySafetyMargin || '0'),
+          api.updateSetting('pricing_minute_limit', minuteLimit || '30'),
+          api.updateSetting('pricing_provider_host', providerHost),
+          api.updateSetting('pricing_provider_episodes_path', providerEpisodesPath || '/episodes'),
+          api.updateSetting('pricing_provider_episode_cards_path_template', providerEpisodeCardsPathTemplate || '/episodes/{episodeId}/cards'),
+          api.updateSetting('pricing_provider_currency', providerCurrency),
+          api.updateSetting('pricing_schedule_cron', scheduleCron || '0 0 2 * * *'),
+          api.updateSetting('pricing_provider_api_key', providerApiKey),
+        ]);
+        showAdminResult('pricingSettingsResult', { success: true, message: 'Paramètres pricing enregistrés.' });
+        refreshPricingStatus();
+      } catch (err) {
+        showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur sauvegarde pricing : ' + err.message });
+      }
+    });
+
+    document.getElementById('pricingRunBtn').addEventListener('click', async () => {
+      const rawMax = document.getElementById('pricingMaxAttempts').value.trim();
+      const maxAttempts = rawMax ? parseInt(rawMax, 10) : undefined;
+      setSyncBusy(true);
+      try {
+        const result = await api.runPricingSync(Number.isFinite(maxAttempts) ? maxAttempts : undefined);
+        const statusCounts = result.statusCounts && typeof result.statusCounts === 'object'
+          ? Object.entries(result.statusCounts).map(([k, v]) => `${k}:${v}`).join(', ')
+          : '';
+        const details = [
+          `Appels: ${result.attempted ?? 0}`,
+          `Pages episodes: ${result.episodePagesProcessed ?? 0}`,
+          `Pages cartes: ${result.episodeCardsPagesProcessed ?? 0}`,
+          `Succès: ${result.successCount ?? 0}`,
+          `Non résolues: ${result.unresolvedCount ?? 0}`,
+          `Erreurs: ${result.errorCount ?? 0}`,
+          `Restant: ${result.remainingAttempts ?? 0}`,
+          `File sans prix: ${result.queueWithoutPrice ?? 0}`,
+          `File stale > 7j: ${result.queueStaleOver7Days ?? 0}`,
+          `File avec prix: ${result.queueWithPrice ?? 0}`,
+          `Stop: ${result.stopReason ?? result.reasonCode ?? ''}`,
+          statusCounts ? `Statuts: ${statusCounts}` : '',
+        ].join(' | ');
+        const defaultMessage = `Run pricing terminé. ${details}`;
+        const isBudgetExhausted = result.reasonCode === 'BUDGET_EXHAUSTED' || result.reasonCode === 'BUDGET_EXHAUSTED_AFTER_ATTEMPTS';
+        const isProviderConfigMissing = result.reasonCode === 'PROVIDER_CONFIG_MISSING';
+        showAdminResult('pricingSettingsResult', {
+          success: !!result.started,
+          level: (isBudgetExhausted || isProviderConfigMissing) ? 'warning' : undefined,
+          message: result.message ? `${result.message} (${details})` : defaultMessage
+        });
+        await refreshPricingStatus();
+      } catch (err) {
+        showAdminResult('pricingSettingsResult', { success: false, message: 'Erreur run pricing : ' + err.message });
+      } finally {
+        setSyncBusy(false);
+      }
+    });
+
+    document.getElementById('pricingSimulateBtn').addEventListener('click', async () => {
+      const rawJson = document.getElementById('pricingSimulateJson').value.trim();
+      if (!rawJson) {
+        showAdminResult('pricingSimulateResult', { success: false, message: 'Collez un JSON avant de lancer la simulation.' });
+        return;
+      }
+      try {
+        const result = await api.simulatePricingImport(rawJson);
+        showAdminResult('pricingSimulateResult', {
+          success: !!result.success,
+          message: result.message || (result.success ? 'Import simulé appliqué.' : 'Echec de la simulation.')
+        });
+        if (result.success) await refreshPricingStatus();
+      } catch (err) {
+        showAdminResult('pricingSimulateResult', { success: false, message: 'Erreur simulation import : ' + err.message });
+      }
+    });
 
     // ── API Keys ──────────────────────────────────────────────────────────
     const apiKeysSection = document.getElementById('apiKeysSection');
@@ -2028,6 +3007,27 @@ function renderAdmin() {
       }
     });
 
+    // ── Export Dreamborn ─────────────────────────────────────────────────
+    document.getElementById('dreambornExportBtn').addEventListener('click', async () => {
+      const reserve = document.getElementById('dreambornReserve')?.checked !== false;
+      try {
+        const csv = await api.exportDreamborn(reserve);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lorcalex-dreamborn-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showAdminResult('dreambornExportResult', {
+          success: true,
+          message: reserve ? 'Export Dreamborn téléchargé avec réserve.' : 'Export Dreamborn téléchargé sans réserve.'
+        });
+      } catch (err) {
+        showAdminResult('dreambornExportResult', { success: false, message: 'Erreur export Dreamborn : ' + err.message });
+      }
+    });
+
     // ── Import Companion ───────────────────────────────────────────────────
     document.getElementById('companionImportFile').addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -2062,8 +3062,10 @@ function renderAdmin() {
 function showAdminResult(elementId, result) {
   const el = document.getElementById(elementId);
   if (!el) return;
-  el.innerHTML = `<div class="alert ${result.success ? 'alert-success' : 'alert-error'}">${esc(result.message)}</div>`;
-  if (result.success) {
+  const level = result.level || (result.success ? 'success' : 'error');
+  const klass = level === 'warning' ? 'alert-warning' : (level === 'success' ? 'alert-success' : 'alert-error');
+  el.innerHTML = `<div class="alert ${klass}">${esc(result.message)}</div>`;
+  if (level === 'success') {
     setTimeout(() => { if (el) el.innerHTML = ''; }, 6000);
   }
 }
