@@ -126,6 +126,16 @@ docker compose up --build
 # → http://localhost:8181
 ```
 
+### Identité du build
+
+L'en-tête de la page **Administration** affiche la version de l'application et le SHA Git court de l'artefact déployé, au format `version - SHA court` (par exemple `2.9.5 - 6808cac`).
+
+Les images publiées par GitHub Actions reçoivent automatiquement le SHA du commit source pendant leur build. Un build local qui ne fournit pas l'argument Docker `GIT_COMMIT` affiche `version - unknown`; ce comportement indique explicitement que la révision source n'a pas été intégrée à l'artefact.
+
+```bash
+docker build --build-arg GIT_COMMIT="$(git rev-parse HEAD)" -t lorcalex .
+```
+
 ### Portainer — Stack
 
 1. Dans Portainer → **Stacks → Add stack**.

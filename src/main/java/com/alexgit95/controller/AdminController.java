@@ -15,6 +15,8 @@ import com.alexgit95.repository.UserCollectionRepository;
 import com.alexgit95.service.LorcaJsonService;
 import com.alexgit95.service.PricingScheduleService;
 import com.alexgit95.service.PricingSyncService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +46,7 @@ public class AdminController {
     private final PricingScheduleService pricingScheduleService;
     private final CollectionValueSnapshotRepository collectionValueSnapshotRepository;
     private final EditionValueSnapshotRepository editionValueSnapshotRepository;
+    private final ObjectProvider<BuildProperties> buildPropertiesProvider;
 
     public AdminController(AppSettingsRepository settingsRepository,
                            LorcaJsonService lorcaJsonService,
@@ -53,7 +56,8 @@ public class AdminController {
                            PricingSyncService pricingSyncService,
                            PricingScheduleService pricingScheduleService,
                            CollectionValueSnapshotRepository collectionValueSnapshotRepository,
-                           EditionValueSnapshotRepository editionValueSnapshotRepository) {
+                           EditionValueSnapshotRepository editionValueSnapshotRepository,
+                           ObjectProvider<BuildProperties> buildPropertiesProvider) {
         this.settingsRepository = settingsRepository;
         this.lorcaJsonService = lorcaJsonService;
         this.userCollectionRepository = userCollectionRepository;
@@ -63,11 +67,27 @@ public class AdminController {
         this.pricingScheduleService = pricingScheduleService;
         this.collectionValueSnapshotRepository = collectionValueSnapshotRepository;
         this.editionValueSnapshotRepository = editionValueSnapshotRepository;
+        this.buildPropertiesProvider = buildPropertiesProvider;
     }
 
     @GetMapping("/settings")
     public ResponseEntity<List<AppSettings>> getSettings() {
         return ResponseEntity.ok(settingsRepository.findAll());
+    }
+
+    @GetMapping("/version")
+    public ResponseEntity<Map<String, String>> getBuildIdentity() {
+        BuildProperties buildProperties = buildPropertiesProvider.getIfAvailable();
+        if (buildProperties == null) {
+            return ResponseEntity.ok(Map.of("version", "unknown", "commit", "unknown"));
+        }
+
+        String version = Optional.ofNullable(buildProperties.getVersion()).orElse("unknown");
+        String commit = Optional.ofNullable(buildProperties.get("git.commit"))
+                .filter(value -> !value.isBlank())
+                .map(value -> value.length() > 7 ? value.substring(0, 7) : value)
+                .orElse("unknown");
+        return ResponseEntity.ok(Map.of("version", version, "commit", commit));
     }
 
     @PutMapping("/settings/{key}")

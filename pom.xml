@@ -21,6 +21,7 @@
     <properties>
         <java.version>25</java.version>
         <jjwt.version>0.13.0</jjwt.version>
+        <git.commit>unknown</git.commit>
     </properties>
 
     <dependencies>
@@ -156,6 +157,18 @@
                         </exclude>
                     </excludes>
                 </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                        <configuration>
+                            <additionalProperties>
+                                <git.commit>${git.commit}</git.commit>
+                            </additionalProperties>
+                        </configuration>
+                    </execution>
+                </executions>
            </plugin>
         </plugins>
     </build>

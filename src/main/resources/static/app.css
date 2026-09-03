@@ -71,6 +71,14 @@ body {
   letter-spacing: 0.5px;
 }
 
+.build-identity {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 /* Cards grid */
 .cards-grid {
   display: grid;

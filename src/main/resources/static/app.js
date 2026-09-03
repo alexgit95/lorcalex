@@ -83,6 +83,8 @@ const api = {
 
   getSettings: () => apiFetch('/admin/settings'),
 
+  getBuildIdentity: () => apiFetch('/admin/version'),
+
   updateSetting: (key, value) =>
     apiFetch(`/admin/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
 
@@ -2236,7 +2238,10 @@ function renderAdmin() {
     <div class="app">
       <div class="page">
         <div class="page-header">
-          <h1>⚙️ Administration</h1>
+          <div>
+            <h1>⚙️ Administration</h1>
+            <span class="build-identity" id="buildIdentity">Version indisponible</span>
+          </div>
           <button class="btn btn-ghost" id="logoutBtn" style="margin-left:auto;font-size:.8rem;padding:6px 12px">Déconnexion</button>
         </div>
         <div id="adminContent" style="padding:12px">${loadingHTML()}</div>
@@ -2259,7 +2264,13 @@ function renderAdmin() {
     api.getProgress(),
     api.getEditions(),
     api.getPricingStatus().catch(() => null),
-  ]).then(([settings, urlData, progressData, editions, pricingStatus]) => {
+    api.getBuildIdentity().catch(() => null),
+  ]).then(([settings, urlData, progressData, editions, pricingStatus, buildIdentity]) => {
+    const buildIdentityElement = document.getElementById('buildIdentity');
+    if (buildIdentityElement && buildIdentity?.version && buildIdentity?.commit) {
+      buildIdentityElement.textContent = `${buildIdentity.version} - ${buildIdentity.commit}`;
+    }
+
     const content = document.getElementById('adminContent');
     if (!content) return;
     const currentUrl = urlData.url || 'https://lorcanajson.org/files/current/fr/allCards.json';
