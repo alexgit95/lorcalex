@@ -29,7 +29,7 @@ Le frontend HTML/JS/CSS vanilla est **inclus dans le JAR Spring Boot** — un se
 
 | Écran | Description |
 |-------|-------------|
-| **Collection** | Cartes triées par set et numéro croissants, filtrage possédées / manquantes / **✦ Foil**, recherche, ajout/retrait. |
+| **Collection** | Cartes triées par set et numéro croissants, filtrage possédées / manquantes / **Préférées** / **✦ Foil**, recherche, ajout/retrait. |
 | **Visualisation carte** | Clic sur une carte → grande image plein-écran, compteurs Regular et Foil, modification directe des quantités. |
 | **Statistiques** | Graphiques Chart.js (donut, barres empilées) : progression globale, par set, par rareté. |
 | **Scanner** | OCR caméra en continu : lecture du code bas-gauche (`N/TOTAL • FR • SET`), arrêt automatique à la détection, vue de confirmation, reprise rapide. |
@@ -179,7 +179,7 @@ APP_PORT=8181
 - Cartes triées par **numéro de set croissant**, puis **numéro de carte croissant**.
 - Chaque carte affiche son numéro de set (ex : `S1·#42`).
 - Le sélecteur de set affiche : **Set 1 — Premier Chapitre**, **Set 2 — L'Ascension des Floodborn**, etc.
-- Filtres disponibles : **Toutes**, **Possédées**, **Manquantes**, **✦ Foil**.
+- Filtres disponibles : **Toutes**, **Possédées**, **Manquantes**, **Préférées** et **✦ Foil**. Le filtre **Préférées** affiche les cartes marquées comme préférées, qu'elles soient possédées ou manquantes.
 - Recherche par nom : nécessite au moins **3 caractères** pour filtrer (en dessous, la grille reste inchangée et un indice invite à taper au moins 3 caractères) ; le filtrage se déclenche 300ms après la dernière frappe.
 - Nombre de colonnes affichées adapté à la largeur d'écran, **plafonné à 10 colonnes** sur desktop (les cartes s'agrandissent plutôt que de multiplier les colonnes) ; recalculé en direct si la fenêtre est redimensionnée. Comportement mobile inchangé.
 - Les images ne sont chargées qu'à l'approche de l'écran (au fur et à mesure du défilement), avec un espace réservé le temps du chargement pour éviter tout saut de mise en page.
@@ -191,6 +191,7 @@ Cliquer sur une carte ouvre un écran détail avec :
 - Grande image plein-écran
 - Set + numéro + nom + rareté
 - Prix de marché et date de dernière mise à jour, lorsqu'ils sont disponibles
+- Action **Ajouter aux cartes voulues** ou **Retirer des cartes voulues**, disponible que la carte soit possédée ou non ; cette action ne modifie jamais les quantités
 - Compteurs **Regular** et **Foil** modifiables indépendamment (boutons + / −)
 - Dates de premier ajout et de dernière modification
 

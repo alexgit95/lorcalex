@@ -425,8 +425,8 @@ function renderCollection() {
         </div>
         <div id="editionBar" class="filter-bar">${loadingHTML('')}</div>
         <div id="filterBar" class="filter-bar">
-          ${['all','owned','missing','foil'].map((k,i) =>
-            `<button class="filter-chip${collState.filter===k?' active':''}" data-filter="${k}">${['Toutes','Possédées','Manquantes','✦ Foil'][i]}</button>`
+          ${['all','owned','missing','wanted','foil'].map((k,i) =>
+            `<button class="filter-chip${collState.filter===k?' active':''}" data-filter="${k}">${['Toutes','Possédées','Manquantes','Préférées','✦ Foil'][i]}</button>`
           ).join('')}
         </div>
         <div class="search-bar">
@@ -528,6 +528,7 @@ function renderCards() {
   const filtered = cards.filter(c => {
     if (filter === 'owned' && !c.owned) return false;
     if (filter === 'missing' && c.owned) return false;
+    if (filter === 'wanted' && !c.wanted) return false;
     if (filter === 'foil' && !(c.foilQuantity > 0)) return false;
     if (searchActive && !c.name.toLowerCase().includes(trimmedSearch.toLowerCase())) return false;
     return true;
@@ -1000,6 +1001,9 @@ function openModal(cardId) {
             ? `<div style="font-size:.85rem;font-weight:600;margin-bottom:12px;color:${RARITY_COLORS[card.rarity]||'var(--text-muted)'}">${esc(card.rarity)}</div>`
             : ''}
           ${priceMetadataHTML(card)}
+          <button class="btn ${card.wanted ? 'btn-accent' : 'btn-ghost'} btn-full" id="modalWantedToggleBtn" aria-label="${card.wanted ? 'Retirer cette carte des cartes voulues' : 'Ajouter cette carte aux cartes voulues'}" style="margin-top:10px">
+            ${card.wanted ? '★ Retirer des cartes voulues' : '☆ Ajouter aux cartes voulues'}
+          </button>
           ${card.owned && card.marketPrice != null && ownedPricingCardsState.some(c => c.id === card.id)
             ? `<button class="btn btn-ghost btn-full" id="removeCardPriceBtn" style="margin-top:10px">Supprimer le prix</button>`
             : ''}
@@ -1043,6 +1047,25 @@ function openModal(cardId) {
   });
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
   document.getElementById('modalContent').addEventListener('click', e => e.stopPropagation());
+
+  document.getElementById('modalWantedToggleBtn').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const updated = await api.setWanted(card.id, !card.wanted);
+      const updateCache = cards => cards.map(c => c.id === updated.id ? updated : c);
+      collState.cards = updateCache(collState.cards);
+      recentCardsState = updateCache(recentCardsState);
+      pricingCardsState = updateCache(pricingCardsState);
+      ownedPricingCardsState = updateCache(ownedPricingCardsState);
+      collState.modal = updated;
+      openModal(updated.id);
+      if (document.getElementById('cardsArea')) renderCards();
+    } catch (error) {
+      button.disabled = false;
+      showToast(`Échec de la mise à jour du statut voulu : ${error.message}`, { error: true });
+    }
+  });
 
   const removeCardPriceButton = document.getElementById('removeCardPriceBtn');
   if (removeCardPriceButton) {

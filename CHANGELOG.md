@@ -11,6 +11,8 @@ et ce projet respecte la Versioning Sémantique.
 
 ### Added
 
+- Détail d'une carte : ajout ou retrait du statut **wanted** directement depuis la fiche, pour les cartes possédées comme non possédées, sans modification des quantités de collection.
+- Onglet Collection : ajout d'un filtre **Préférées** affichant les cartes marquées comme préférées, qu'elles soient possédées ou manquantes, dans l'édition sélectionnée.
 - Administration : export CSV Dreamborn.ink de la collection, avec un choix pour conserver ou non un exemplaire en réserve par carte. La réserve est activée par défaut et retire une foil en priorité, puis une normale.
 - Synchronisation des prix : le seuil du log de débogage `"High market price detected"` (défaut : 5€) est désormais configurable depuis l'onglet Admin (`pricing_log_high_price_threshold`), au lieu d'être fixé en dur dans le code.
 - Synchronisation des prix : nouvelle alerte indépendante `"Abnormal price detected for low rarity card"` (désactivée par défaut) signalant les cartes d'une rarité provider "basse" (`Common,Uncommon,rare,Super_rare` par défaut, personnalisable) dont le prix calculé dépasse un seuil configurable (défaut 5€) — activation, seuil et liste de raretés réglables depuis l'onglet Admin, indépendamment du log "High market price" existant.
