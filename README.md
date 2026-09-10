@@ -217,12 +217,13 @@ Token stocké dans `localStorage` (avec) ou `sessionStorage` (sans).
 ### Utilisation
 
 1. Ouvrir **Scanner** — le scan continu démarre automatiquement.
-2. Présenter la carte dans le cadre.
-3. À la détection (bip + vibration) : choisir **◇ Ajouter normal**, **✦ Ajouter foil** ou **↻ Recommencer**.
+2. Facultatif : sélectionner une édition pour limiter strictement la recherche à ce set. Par défaut, **Toutes les éditions** conserve la recherche dans tout le catalogue.
+3. Présenter la carte dans le cadre.
+4. À la détection (bip + vibration) : choisir **◇ Ajouter normal**, **✦ Ajouter foil** ou **↻ Recommencer**.
 
 ### Fallback manuel
 
-En cas d'échec OCR (mauvaise luminosité, reflet), utiliser la saisie manuelle du **numéro de carte** et du **set** en bas de l'écran Scanner.
+En cas d'échec OCR (mauvaise luminosité, reflet), utiliser la saisie manuelle du **numéro de carte** et du **set** en bas de l'écran Scanner. Lorsqu'une édition précise est sélectionnée, cette édition s'applique aussi à la saisie manuelle, sans repli vers les autres éditions, et le champ **Set** est désactivé.
 
 ---
 
@@ -514,7 +515,7 @@ Les routes `/api/auth/login`, `/api/health` et `/api/export` sont publiques.
 | `GET` | `/api/editions` | JWT | Liste des sets triés |
 | `GET` | `/api/cards?editionId=&q=` | JWT | Cartes filtrées |
 | `GET` | `/api/cards/{id}` | JWT | Détail carte |
-| `GET` | `/api/cards/lookup?number=&editionId=` | JWT | Lookup scanner |
+| `GET` | `/api/cards/lookup?number=&editionId=` | JWT | Lookup scanner, limité à l'édition indiquée lorsque `editionId` est fourni |
 | `GET` | `/api/cards/fingerprints` | JWT | Empreintes visuelles |
 | `PATCH` | `/api/cards/{id}/wanted` | JWT | Marque/démarque une carte comme "voulue" |
 | `GET/POST` | `/api/collection` | JWT | Collection possédée |

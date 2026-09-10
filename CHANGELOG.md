@@ -5,9 +5,18 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur Keep a Changelog,
 et ce projet respecte la Versioning Sémantique.
 
+
 ---
 
-## [Unreleased]
+## [3.1.1]
+
+### Added
+
+- Onglet Scanner : nouveau sélecteur d'édition pour guider la reconnaissance. Par défaut, la recherche couvre toutes les éditions ; lorsqu'une édition est choisie, les recherches OCR et manuelles sont strictement limitées à celle-ci, sans repli global, et le champ de set manuel est désactivé.
+
+---
+
+## [3.1.0]
 
 ### Added
 
