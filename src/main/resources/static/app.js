@@ -1743,7 +1743,45 @@ let _scanState = {
   scanning: false,
   continuous: false,
   continuousRunId: 0,
+  editionId: null,
+  editions: [],
 };
+
+function scannerEditionLabel() {
+  const edition = _scanState.editions.find(e => e.id === _scanState.editionId);
+  return edition ? edition.name : 'l\'édition sélectionnée';
+}
+
+function renderScannerEditionSelector() {
+  const select = document.getElementById('scannerEditionSelect');
+  if (!select) return;
+  select.innerHTML = [
+    '<option value="">Toutes les éditions</option>',
+    ..._scanState.editions.map(edition => {
+      const label = edition.setNumber
+        ? `Set ${edition.setNumber} — ${edition.name}`
+        : (edition.code || edition.name);
+      return `<option value="${edition.id}">${esc(label)}</option>`;
+    }),
+  ].join('');
+  select.value = _scanState.editionId ?? '';
+}
+
+function updateScannerEditionScope() {
+  const select = document.getElementById('scannerEditionSelect');
+  const setInput = document.getElementById('manualSet');
+  _scanState.editionId = select?.value ? parseInt(select.value, 10) : null;
+  if (setInput) setInput.disabled = _scanState.editionId !== null;
+}
+
+async function loadScannerEditions() {
+  try {
+    _scanState.editions = await api.getEditions();
+  } catch {
+    _scanState.editions = [];
+  }
+  renderScannerEditionSelector();
+}
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -1827,10 +1865,18 @@ function restartScannerCapture() {
 }
 
 function renderScanner() {
+  _scanState.editionId = null;
+  _scanState.editions = [];
   document.getElementById('app').innerHTML = `
     <div class="app">
       <div class="page">
         <div class="page-header"><h1>📷 Scanner</h1></div>
+        <div style="padding:0 12px 12px">
+          <label for="scannerEditionSelect" style="display:block;font-size:.75rem;color:var(--text-muted);margin-bottom:6px">Édition</label>
+          <select class="search-input" id="scannerEditionSelect" aria-label="Édition du scanner" style="width:100%;border-radius:8px">
+            <option value="">Toutes les éditions</option>
+          </select>
+        </div>
         <div id="scanCameraArea"></div>
         <div id="scanAlerts"></div>
         <div id="scanDebug"></div>
@@ -1848,7 +1894,9 @@ function renderScanner() {
     </div>`;
 
   const cameraArea = document.getElementById('scanCameraArea');
-  loadScannerSettings().then(() => navigator.mediaDevices?.getUserMedia({
+    document.getElementById('scannerEditionSelect').addEventListener('change', updateScannerEditionScope);
+    loadScannerEditions();
+    loadScannerSettings().then(() => navigator.mediaDevices?.getUserMedia({
     video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
   }))
     .then(stream => {
@@ -1967,15 +2015,17 @@ async function handleCapture(mode, options = {}) {
 
     // Étape 4 — Recherche de la carte en base
     if (activeBtn) activeBtn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Recherche carte #${parsed.cardNum}…`;
-    const cards = await api.lookupCard(parsed.cardNum, undefined);
+    const selectedEditionId = _scanState.editionId;
+    const cards = await api.lookupCard(parsed.cardNum, selectedEditionId);
     if (cards.length === 0) {
       if (!silentNoMatch) {
-        setScanAlert(`Aucune carte #${parsed.cardNum} en base. Importez d'abord le catalogue via Administration.`, 'error');
+        const scope = selectedEditionId === null ? 'en base' : `dans ${scannerEditionLabel()}`;
+        setScanAlert(`Aucune carte #${parsed.cardNum} ${scope}.`, 'error');
       }
       return false;
     }
     let matchedCards = cards;
-    if (parsed.setNum !== null && cards.length > 1) {
+    if (selectedEditionId === null && parsed.setNum !== null && cards.length > 1) {
       const filtered = cards.filter(c => c.editionSetNumber === parsed.setNum);
       if (filtered.length > 0) matchedCards = filtered;
     }
@@ -2005,21 +2055,23 @@ async function handleManualLookup() {
   setScanDebug([]);
   document.getElementById('foundCardsArea').innerHTML = '';
   try {
-    const cards = await api.lookupCard(num, undefined);
+    const selectedEditionId = _scanState.editionId;
+    const cards = await api.lookupCard(num, selectedEditionId);
     let matchedCards = cards;
-    if (setNum && cards.length > 1) {
+    if (selectedEditionId === null && setNum && cards.length > 1) {
       const filtered = cards.filter(c => c.editionSetNumber === setNum);
       if (filtered.length > 0) matchedCards = filtered;
     }
-    await handleFoundCards(matchedCards, num);
+    await handleFoundCards(matchedCards, num, selectedEditionId !== null);
   } catch (e) {
     setScanAlert(`Erreur : ${e.message}`, 'error');
   }
 }
 
-async function handleFoundCards(cards, num) {
+async function handleFoundCards(cards, num, editionScoped = false) {
   if (cards.length === 0) {
-    setScanAlert(`Carte #${num} non trouvée. Importez d'abord le catalogue via Administration.`, 'error');
+    const scope = editionScoped ? ` dans ${scannerEditionLabel()}` : '';
+    setScanAlert(`Carte #${num} non trouvée${scope}.`, 'error');
   } else if (cards.length === 1) {
     renderCardConfirmation(cards[0]);
   } else {
