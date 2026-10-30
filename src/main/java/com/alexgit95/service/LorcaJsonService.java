@@ -142,7 +142,7 @@ public class LorcaJsonService {
             try {
                 String targetUrl = (url != null && !url.isBlank()) ? url : getLorcaJsonUrl();
                 log.info("Syncing from URL: {}", targetUrl);
-                String json = webClientBuilder.build().get().uri(targetUrl)
+                String json = webClientBuilder.codecs(c -> c.defaultCodecs().maxInMemorySize(100 * 1024 * 1024)).build().get().uri(targetUrl)
                         .retrieve().bodyToMono(String.class).block();
                 if (json == null || json.isBlank())
                     throw new RuntimeException("Réponse vide depuis l'URL.");

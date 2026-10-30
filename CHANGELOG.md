@@ -8,6 +8,14 @@ et ce projet respecte la Versioning Sémantique.
 
 ---
 
+## [3.1.2]
+
+### Fixed
+
+- Administration : la synchronisation des cartes depuis l'URL LorcanaJSON ne échoue plus avec `DataBufferLimitException` ; la limite de buffer mémoire du client HTTP est portée à 100 Mo pour le téléchargement de `allCards.json`.
+
+---
+
 ## [3.1.1]
 
 ### Added
