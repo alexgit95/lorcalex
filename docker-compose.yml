@@ -3,7 +3,7 @@ version: "3.9"
 services:
   # ── Base de données PostgreSQL ────────────────────────────────
   postgres:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     container_name: lorcalex-postgres
     restart: unless-stopped
     environment:
